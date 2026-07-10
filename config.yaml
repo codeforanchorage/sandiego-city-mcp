@@ -1,16 +1,16 @@
 # OpenContext Configuration
 # ==========================
 #
-# Worcester GIS MCP — derived from config-example.yaml.
+# San Diego City GIS MCP — derived from the Worcester GIS fork.
 #
 # IMPORTANT: Enable ONLY ONE plugin per fork/deployment (One Fork = One MCP Server).
 # See docs/ARCHITECTURE.md for details.
 
 ---
 # Server metadata
-server_name: "Worcester GIS MCP"
-description: "City of Worcester GIS MCP server - Safe, conversational access to Worcester open data"
-organization: "City of Worcester"
+server_name: "San Diego City GIS"
+description: "City of San Diego GIS MCP server - Safe, conversational access to the city's ArcGIS Server layers"
+organization: "City of San Diego"
 
 # Plugin configuration
 # ====================
@@ -28,20 +28,46 @@ plugins:
     timeout: 120 # HTTP timeout in seconds
     # api_key: "${CKAN_API_KEY}"  # Optional: CKAN API key for authenticated requests
 
-  # Built-in: ArcGIS Hub (for ArcGIS Hub open data portals)
-  # Worcester's open data portal is an ArcGIS Hub site.
+  # Built-in: ArcGIS Server directory (for bare ArcGIS Server REST services
+  # directories with no Hub/Open Data catalog in front of them).
+  #
+  # Discovery comes from a precomputed catalog manifest. Refresh it with:
+  #   python scripts/crawl_catalog.py
+  # then redeploy. The running server never crawls live.
   arcgis:
-    enabled: true # Set to true to use
-    portal_url: "https://opendata.worcesterma.gov"
-    city_name: "City of Worcester"
+    enabled: true
+    services_url: "https://webmaps.sandiego.gov/arcgis/rest/services"
+    city_name: "City of San Diego"
     timeout: 120
-    geocoder_region: "Worcester, MA" # biases address geocoding to Worcester
-    # token: "${ARCGIS_TOKEN}"  # Optional: Bearer token for private items
+    geocoder_region: "San Diego, CA" # biases address geocoding to San Diego
+    catalog_path: "plugins/arcgis/catalog.json"
+    # token: "${ARCGIS_TOKEN}"  # Optional: token for non-anonymous services
+    #
+    # Known-good public layers, curated for search. Aliases/notes are applied
+    # at load time (no re-crawl needed to edit them). All three live in the
+    # anonymous Planning/PLN_LongRangePlanning MapServer.
+    featured_datasets:
+      - dataset_id: "Planning/PLN_LongRangePlanning/MapServer/7"
+        aliases: ["MHPA", "habitat preserve", "multi-habitat planning area"]
+        note: >-
+          Multi-Habitat Planning Area (MHPA) -- the City's habitat preserve
+          planning boundaries. Polygon layer. Key fields: HABPRES (int, %
+          targeted preservation), INHABPRES (Yes/No), SUBAREA, ACRES.
+      - dataset_id: "Planning/PLN_LongRangePlanning/MapServer/27"
+        aliases: ["zoning", "base zones", "zone"]
+        note: >-
+          Base Zones -- the official City of San Diego zoning layer.
+          Polygon layer; zone codes like RS-1-7, CC-3-5.
+      - dataset_id: "Planning/PLN_LongRangePlanning/MapServer/24"
+        aliases: ["land use", "community plan"]
+        note: >-
+          Community Plan Land Use -- adopted community plan land use
+          designations. Polygon layer.
 
 # AWS deployment settings
 aws:
   region: "us-west-2" # AWS region for Lambda
-  lambda_name: "worcester-gis-mcp" # Lambda function name
+  lambda_name: "sandiego-city-gis-mcp" # Lambda function name
   lambda_memory: 512 # Lambda memory in MB (128-10240)
   lambda_timeout: 120 # Lambda timeout in seconds (max 900)
 

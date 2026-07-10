@@ -43,14 +43,24 @@ plugins:
     timeout: 120 # HTTP timeout in seconds
     # api_key: "${CKAN_API_KEY}"  # Optional: CKAN API key for authenticated requests
 
-  # Built-in: ArcGIS Hub (for ArcGIS Hub open data portals)
-  # Examples: hub.arcgis.com, data-boston.hub.arcgis.com
+  # Built-in: ArcGIS Server directory (for bare ArcGIS Server REST services
+  # directories with no Hub/Open Data catalog in front of them).
+  # Example: https://webmaps.sandiego.gov/arcgis/rest/services
+  #
+  # Discovery comes from a precomputed catalog manifest bundled with the
+  # deployment. Build/refresh it with: python scripts/crawl_catalog.py
   arcgis:
     enabled: false # Set to true to use
-    portal_url: "https://hub.arcgis.com"
+    services_url: "https://example.gov/arcgis/rest/services"
     city_name: "Your City"
     timeout: 120
-    # token: "${ARCGIS_TOKEN}"  # Optional: Bearer token for private items
+    geocoder_region: "Your City, ST" # biases address geocoding
+    catalog_path: "plugins/arcgis/catalog.json"
+    # token: "${ARCGIS_TOKEN}"  # Optional: token for non-anonymous services
+    # featured_datasets:  # Optional: curated layers boosted in search
+    #   - dataset_id: "Folder/Service/MapServer/7"
+    #     aliases: ["MHPA"]
+    #     note: "One-line curated description shown in results."
 
   # yamllint disable rule:comments-indentation
   # Custom: Add your own plugins here
