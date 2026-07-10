@@ -4,6 +4,32 @@ This directory contains utility scripts for OpenContext MCP server.
 
 ## Scripts
 
+### `crawl_catalog.py`
+
+Builds the layer catalog manifest for the `arcgis` (ArcGIS Server directory) plugin — the discovery index the running server loads at startup. The manifest is a **deploy artifact**: re-run the crawler, review the diff, commit, redeploy.
+
+**Usage:**
+```bash
+python3 scripts/crawl_catalog.py                       # uses config.yaml services_url
+python3 scripts/crawl_catalog.py --services-url URL --out path.json
+```
+
+**What it does:**
+- Walks the ArcGIS Server REST services directory (folders → MapServer/FeatureServer services → `/layers`)
+- Indexes every anonymously queryable feature layer (id, name, geometry, description, extent, `maxRecordCount`)
+- Detects auth-gated services (HTTP 401/403, ArcGIS codes 498/499) and records them in the manifest's `skipped` list
+- Writes `plugins/arcgis/catalog.json`
+
+### `smoke_prod.py`
+
+End-to-end smoke test of a deployed (or local) server: JSON-RPC surface, search resolution for "MHPA" and "zoning", schema, `TOTAL MATCHING` counts, the MHPA point-in-polygon verification query, and the geocode → zoning chain.
+
+**Usage:**
+```bash
+python3 scripts/smoke_prod.py                            # production domain
+python3 scripts/smoke_prod.py http://localhost:8000/mcp  # local server
+```
+
 ### `deploy.sh`
 
 Deployment script that validates configuration and deploys the MCP server to AWS Lambda.
@@ -18,7 +44,7 @@ Deployment script that validates configuration and deploys the MCP server to AWS
 | Flag | Short | Required | Description |
 |------|-------|----------|-------------|
 | `--environment` | `-e` | Yes | `staging` or `prod` |
-| `--tfworkspace` | `-w` | No | Terraform workspace name (default: `boston-staging` or `boston-prod`) |
+| `--tfworkspace` | `-w` | No | Terraform workspace name (default: `sandiego-city-staging` or `sandiego-city-prod`) |
 | `--help` | `-h` | No | Show help |
 
 **Examples:**
@@ -26,7 +52,7 @@ Deployment script that validates configuration and deploys the MCP server to AWS
 ./scripts/deploy.sh --environment staging
 ./scripts/deploy.sh -e prod
 ./scripts/deploy.sh --environment staging --tfworkspace my-workspace
-./scripts/deploy.sh -e prod -w boston-prod-v2
+./scripts/deploy.sh -e prod -w sandiego-city-prod-v2
 ```
 
 **What it does:**

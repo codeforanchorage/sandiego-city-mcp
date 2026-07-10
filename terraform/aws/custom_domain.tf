@@ -1,5 +1,5 @@
 # Custom domain resources for the prod MCP server.
-# Only created when var.custom_domain is non-empty (i.e. worcester-prod workspace).
+# Only created when var.custom_domain is non-empty (i.e. the prod workspace).
 # DNS records are managed externally — no Route53 resources here.
 
 locals {
@@ -37,7 +37,7 @@ resource "aws_api_gateway_domain_name" "custom" {
 }
 
 # ── Base Path Mapping ───────────────────────────────────────────────────────
-# Empty base path so worcester-gis.codeforanchorage.org/mcp hits the existing /mcp resource.
+# Empty base path so sandiego-city-gis.codeforanchorage.org/mcp hits the existing /mcp resource.
 
 resource "aws_api_gateway_base_path_mapping" "custom" {
   count       = local.create_custom_domain

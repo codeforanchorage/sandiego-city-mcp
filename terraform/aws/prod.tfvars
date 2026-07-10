@@ -1,16 +1,15 @@
-lambda_name = "worcester-gis-mcp-prod"
+lambda_name = "sandiego-city-gis-mcp-prod"
 stage_name  = "prod"
 aws_region  = "us-west-2"
 config_file = "config.yaml"
-# 1024 MB: aggregate_by_polygon holds up to AGG_SOURCE_LIMIT source features in
-# memory plus a bounded 32-entry polygon cache. Also buys more Lambda
-# CPU, which accelerates the pure-Python point-in-polygon work.
-lambda_memory   = 1024
+# 512 MB is plenty: discovery is a static in-memory catalog (~700 layers)
+# and queries stream through to ArcGIS; no polygon math happens in-process.
+lambda_memory   = 512
 lambda_timeout  = 120
 api_quota_limit = 3000
 api_rate_limit  = 5
 api_burst_limit = 10
-custom_domain   = "worcester-gis.codeforanchorage.org"
+custom_domain   = "sandiego-city-gis.codeforanchorage.org"
 
 # Cap concurrent Lambda executions. Cost and blast-radius protection if
 # WAF is bypassed via distributed sources. Conversational MCP traffic does

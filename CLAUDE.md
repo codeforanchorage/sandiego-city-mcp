@@ -2,7 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Worcester fork.** This is a Worcester, MA fork of the OpenContext MCP server framework. It is configured to serve the City of Worcester's open data portal (`opendata.worcesterma.gov`), an ArcGIS Hub site, via the built-in `arcgis` plugin (see `config.yaml`).
+**San Diego City fork.** This is a City of San Diego fork of the OpenContext MCP server framework (forked from the Worcester GIS fork). It serves the City's bare ArcGIS Server REST services directory (`webmaps.sandiego.gov/arcgis/rest/services`, ArcGIS Enterprise 11.5) via the built-in `arcgis` plugin (see `config.yaml`). There is NO ArcGIS Hub catalog in front of this host, so discovery comes from a **precomputed catalog manifest** (`plugins/arcgis/catalog.json`) built offline by `scripts/crawl_catalog.py` and bundled with the deployment — the running server never crawls live. To refresh the catalog, re-run the crawler and redeploy.
+
+Key invariants of the `arcgis` plugin in this fork:
+- **Same tool surface as sibling servers** — `search_datasets`, `get_dataset`, `get_layer_schema`, `get_distinct_values`, `get_aggregations`, `query_data`, `spatial_query_point`, `geocode_address` under the `arcgis__` prefix, identical names/shapes to the Worcester and SANDAG forks.
+- **dataset_id is a services-directory path** — `{folder}/{service}/{MapServer|FeatureServer}/{layerId}`, e.g. `Planning/PLN_LongRangePlanning/MapServer/7` (MHPA). Validated before URL interpolation (security boundary).
+- **WGS84 hard contract** — layers are authored in EPSG:2230 (State Plane CA Zone VI, US survey feet); every query sets `inSR=4326` and `outSR=4326`. Without `inSR`, WGS84 coords are read as State Plane feet and silently match nothing.
+- **Per-layer pagination** — `maxRecordCount` varies by layer and is read from the catalog; `query_data` pages with `resultOffset`/`resultRecordCount`.
+- **Auth-gated services** are detected during the crawl (HTTP 401/403, ArcGIS JSON codes 498/499/403) and recorded in the manifest's `skipped` list; only anonymously queryable layers are indexed.
 
 ## Build & Development Commands
 
@@ -16,6 +23,12 @@ python3 scripts/local_server.py      # Serves on http://localhost:8000/mcp
 
 # Validate config
 python3 -c "from core.validators import load_and_validate_config; load_and_validate_config('config.yaml')"
+
+# Rebuild the layer catalog (deploy artifact; commit the result and redeploy)
+python3 scripts/crawl_catalog.py
+
+# Smoke test a deployment (or a local server)
+python3 scripts/smoke_prod.py http://localhost:8000/mcp
 
 # Tests
 uv run pytest tests/ -n auto                                    # All tests, parallel

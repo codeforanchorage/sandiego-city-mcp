@@ -10,26 +10,63 @@
 
 ---
 
-**Worcester GIS MCP** — a Worcester, MA fork of OpenContext. It serves the City of Worcester's open data portal ([opendata.worcesterma.gov](https://opendata.worcesterma.gov)), an ArcGIS Hub site, through the built-in `arcgis` plugin.
+**San Diego City GIS MCP** — a City of San Diego fork of OpenContext (forked from the Worcester GIS fork). It serves the City's ArcGIS Server REST services directory ([webmaps.sandiego.gov/arcgis/rest/services](https://webmaps.sandiego.gov/arcgis/rest/services), ArcGIS Enterprise 11.5) through the built-in `arcgis` plugin.
+
+It is a **sibling** to the San Diego regional (SANDAG/SanGIS) and Worcester servers: identical tool names and signatures, so it composes with them at the MCP client with zero new orchestration. The regional server covers county-wide layers; this one covers City-authored layers (MHPA, Base Zones, Community Plan Land Use, and ~700 more).
 
 ---
 
-## Connect to the Worcester server
+## How discovery works (no Hub here)
 
-The server is live. Add it as a custom connector in Claude (same steps on Claude.ai and Claude Desktop):
+`webmaps.sandiego.gov` is a **bare services directory** — there is no ArcGIS Hub / Open Data catalog in front of it, so the Hub-search discovery used by the Worcester fork does not apply. Instead:
+
+1. `scripts/crawl_catalog.py` walks the directory offline: folders → MapServer/FeatureServer services → each service's `/layers?f=json`, capturing layer id, name, geometry type, description, extent, and `maxRecordCount`.
+2. The result is serialized to **`plugins/arcgis/catalog.json`** — a versioned, diffable deploy artifact (~718 layers from 329 services at last crawl).
+3. The running server loads that manifest at startup — instant, no live crawl, no cold-start penalty. `search_datasets` does substring/fuzzy/acronym matching over it.
+4. Services that require an ArcGIS account (HTTP 401/403 or ArcGIS error codes 498/499) are skipped during the crawl and recorded in the manifest's `skipped` list — 15 folders on this host at last crawl (AMPGIS, GetItDone, TED, …).
+
+**To refresh the catalog:** `python scripts/crawl_catalog.py`, review the diff, commit, redeploy.
+
+## Dataset IDs
+
+A dataset id is the layer's services-directory path:
+
+```
+{folder}/{service}/{MapServer|FeatureServer}/{layerId}
+```
+
+Known-good public layers (all in the anonymous `Planning/PLN_LongRangePlanning` MapServer):
+
+| Layer | dataset_id | Notes |
+| ----- | ---------- | ----- |
+| Multi-Habitat Planning Area (MHPA) | `Planning/PLN_LongRangePlanning/MapServer/7` | Polygon. Key fields: `HABPRES` (int, % targeted preservation), `INHABPRES`, `SUBAREA`, `ACRES` |
+| Base Zones (official City zoning) | `Planning/PLN_LongRangePlanning/MapServer/27` | Polygon. Zone codes like `RS-1-7`, `CC-3-5` |
+| Community Plan Land Use | `Planning/PLN_LongRangePlanning/MapServer/24` | Polygon |
+
+These are curated as `featured_datasets` in `config.yaml` (aliases + notes boost search; edits take effect on deploy without re-crawling).
+
+## The WGS84 contract
+
+The layers are authored in **EPSG:2230** (NAD83 State Plane California Zone VI, US survey feet). Every query this server sends sets `inSR=4326` and `outSR=4326`, so all tools take and return WGS84 lon/lat — same as the sibling servers. Without `inSR`, WGS84 coordinates would be interpreted as State Plane feet and silently return zero rows.
+
+Pagination is metadata-driven: each layer's `maxRecordCount` comes from the catalog (it varies by layer), and `query_data` pages with `resultOffset`/`resultRecordCount` when needed.
+
+## Connect to the server
+
+Add it as a custom connector in Claude (same steps on Claude.ai and Claude Desktop):
 
 1. **Settings → Connectors** (or **Customize → Connectors** on claude.ai)
 2. **Add custom connector**
-3. Name it e.g. `Worcester GIS` and paste the URL:
+3. Name it e.g. `San Diego City GIS` and paste the URL:
 
    ```
-   https://worcester-gis.codeforanchorage.org/mcp
+   https://sandiego-city-gis.codeforanchorage.org/mcp
    ```
 
 Quick health check from a terminal:
 
 ```bash
-curl -sS -X POST https://worcester-gis.codeforanchorage.org/mcp \
+curl -sS -X POST https://sandiego-city-gis.codeforanchorage.org/mcp \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
 # → {"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}
@@ -39,207 +76,63 @@ curl -sS -X POST https://worcester-gis.codeforanchorage.org/mcp \
 
 | Tool | Purpose |
 | ---- | ------- |
-| `arcgis__search_datasets` | Discover datasets by keyword (e.g. "parcels", "zoning"). Supports a `type` filter — see below. |
-| `arcgis__get_dataset` | Fetch a dataset's metadata and service URL |
-| `arcgis__get_layer_schema` | List a dataset's fields (name, type, alias, coded values), optionally filtered by `keyword` |
+| `arcgis__search_datasets` | Discover layers by keyword (e.g. "MHPA", "zoning"). Matches names, service/folder names, descriptions, acronyms. Optional `type` filter: `MapServer`/`FeatureServer` or a geometry (`Polygon`, `Point`, `Polyline`) |
+| `arcgis__get_dataset` | Fetch a layer's metadata: geometry type, record cap, extent, layer URL |
+| `arcgis__get_layer_schema` | List a layer's fields (name, type, alias, coded values), optionally filtered by `keyword` |
 | `arcgis__get_distinct_values` | List the distinct values in a field (with optional `like` / `where`) to confirm exact codes |
-| `arcgis__query_data` | Query features from a dataset (supports `where`, `out_fields`, `order_by`, `limit`). Output leads with a `TOTAL MATCHING` count, so "how many X?" needs no paging. |
-| `arcgis__spatial_query_point` | Point-in-polygon: which polygon(s) contain a given point — by `lon`/`lat` **or** a street `address` |
-| `arcgis__geocode_address` | Convert a street address to `lon`/`lat` (US Census geocoder, biased to the configured region) |
-| `arcgis__get_aggregations` | Facet counts across the catalog (e.g. by `type`, `tags`, `categories`) |
-
-### Cutting through the catalog noise: `type` filter
-
-Worcester's catalog is **document-heavy** — roughly 719 PDFs (reports, forms, filings) alongside ~231 queryable Feature Services — so a bare keyword search often drowns the analyzable data in paperwork. `search_datasets` takes an optional **`type`** argument that restricts results to a single ArcGIS item type. Pass `type: "Feature Service"` to see only data you can query or map.
-
-`search_datasets` arguments:
-
-| Arg | Required | Description |
-| --- | -------- | ----------- |
-| `q` | yes | Full-text search query (single keywords match best; multi-word queries work too) |
-| `type` | no | Restrict to one item type. Use `"Feature Service"` for queryable data; other values: `"PDF"`, `"Web Map"`, `"StoryMap"`, `"Web Mapping Application"` |
-| `limit` | no | Max results, 1–100 (default 10) |
-
-The difference is stark — for example, `q: "election"`:
-
-| Call | Returns |
-| ---- | ------- |
-| `{ "q": "election" }` | 20 results, **all PDFs** |
-| `{ "q": "election", "type": "Feature Service" }` | **14 Feature Services, 0 PDFs** |
+| `arcgis__query_data` | Query features (supports `where`, `out_fields`, `order_by`, `limit`). Output leads with a `TOTAL MATCHING` count, so "how many X?" needs no paging. Auto-paginates past per-layer record caps |
+| `arcgis__spatial_query_point` | Point-in-polygon: which polygon(s) contain a point — by `lon`/`lat` (WGS84) **or** a street `address` |
+| `arcgis__geocode_address` | Convert a street address to `lon`/`lat` (US Census geocoder, biased to San Diego) |
+| `arcgis__get_aggregations` | Facet counts of the catalog by `folder`, `service`, `service_type`, or `geometry_type` |
 
 Raw JSON-RPC example:
 
 ```bash
-curl -sS -X POST https://worcester-gis.codeforanchorage.org/mcp \
+curl -sS -X POST https://sandiego-city-gis.codeforanchorage.org/mcp \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"arcgis__search_datasets",
-                 "arguments":{"q":"permit","type":"Feature Service","limit":5}}}'
+                 "arguments":{"q":"MHPA","limit":5}}}'
 ```
 
 ### Verified end-to-end
 
-The deployed connector was checked against the live portal with a real question — *"How many active building permits does Worcester have right now?"* — exercising the full chain: type-filtered discovery → `get_layer_schema` → a `query_data` call with a `where` clause.
+The definition-of-done check is a WGS84 point-in-polygon on MHPA at the **Tijuana River Valley** (32.5539, -117.0846) — a point that returns null on the regional server's County `MSCP_CN` layer but sits inside a City MHPA preserve:
 
 ```jsonc
-// arcgis__query_data
+// arcgis__spatial_query_point
 {
-  "dataset_id": "c2309c7a5f0a491d88aac4a80602e5aa",   // Building Permits (Dept. of Inspectional Services)
-  "where": "Record_Status='Active'",
-  "limit": 1
+  "item_id": "Planning/PLN_LongRangePlanning/MapServer/7",
+  "lon": -117.0846,
+  "lat": 32.5539,
+  "out_fields": "HABPRES,INHABPRES,SUBAREA,ACRES"
 }
 ```
 
-The output leads with the full count, so "how many?" needs no paging:
+returns the containing preserve polygon:
 
 ```
-TOTAL MATCHING: 17672
+Record 1:
+  HABPRES: 100
+  INHABPRES: Yes
+  SUBAREA: 113
+  ACRES: 2734.79
 ```
 
-This confirms TLS + custom domain → API Gateway → Lambda → the `arcgis` plugin, including the layer-index resolution, the `type` filter, and `where` filtering all working against live data. (Individual records — addresses, contractor names, and so on — are returned when you query for them; they're just not reproduced here.)
-
-### Writing correct queries: schema → distinct values → query
-
-ArcGIS field names are **case-sensitive**, and codes have exact spellings. Rather than guess (or query blind to discover fields), use the discovery tools first:
-
-1. **`get_layer_schema`** — see the real field names and types. `keyword` narrows a wide schema:
-   ```jsonc
-   { "item_id": "<id>", "keyword": "date" }   // -> Date_Submitted, Permit_License_Issued_Date, ...
-   ```
-2. **`get_distinct_values`** — confirm the exact value to filter on (catches `Residential` vs `1 or 2 Family Dwelling`):
-   ```jsonc
-   { "item_id": "<id>", "field": "Record_Status" }        // -> Active, Complete
-   { "item_id": "<id>", "field": "Permit_For", "like": "ADU" }  // -> Accessory Dwelling Unit (ADU)
-   ```
-3. **`query_data`** — now write the `where` clause with verified names and values.
-
-### Spatial lookup: `spatial_query_point` (by address or coordinates)
-
-"Which polygon contains this location?" — against a polygon Feature Service (parcels, wards, council districts, flood zones, …). Pass **either a street `address`** (geocoded automatically via the US Census geocoder, biased to `geocoder_region` in `config.yaml`) **or** a WGS84 `lon`/`lat` (longitude first):
-
-```jsonc
-// arcgis__spatial_query_point — by address (455 Main St = Worcester City Hall)
-{ "item_id": "<parcel-polygons-id>", "address": "455 Main St",
-  "out_fields": "MAP_PAR_ID,POLY_TYPE" }
-
-// ...or by coordinates
-{ "item_id": "<parcel-polygons-id>", "lon": -71.802, "lat": 42.262 }
-```
-
-Returns the attributes of every polygon containing the point (no geometry); when an address is used, the matched address is shown. You can also geocode on its own with `geocode_address`. Confirm a layer is polygon-based with `get_layer_schema` first.
-
----
-
-## Try asking
-
-Once the connector is added, just ask Claude in plain English — it picks the right tools. Good prompts to show what it can do:
-
-**Discovery**
-- "What datasets does Worcester publish about permits?" *(type-filtered discovery)*
-- "Break down Worcester's open data catalog by type." *(aggregations — mostly PDFs vs Feature Services)*
-- "What kinds of permit data are there — building, electrical, plumbing?"
-
-**Counts & records**
-- "How many active building permits are there right now?" *(answered from `TOTAL MATCHING`, no paging)*
-- "Show me the 5 most recently submitted ADU permits with addresses." *(`order_by` + `where`)*
-- "What values does the building-permit status field take?" *(`get_distinct_values` → Active / Complete)*
-
-**Schema**
-- "What fields does the parcels dataset have?" *(`get_layer_schema`)*
-
-**Spatial**
-- "Which parcel is Worcester City Hall (455 Main St) on?" *(address geocoded automatically, then point-in-polygon)*
-- "What council district contains City Hall?"
-- "Which ward is at latitude 42.262, longitude -71.802?" *(coordinates also work)*
-
-Single keywords match best in discovery; multi-word queries fall back to the most distinctive word automatically if the exact phrase finds nothing.
-
----
-
-## Run locally
-
-`config.yaml` is already committed for Worcester (the `arcgis` plugin pointed at `opendata.worcesterma.gov`), so no setup is needed to run the server locally:
+`scripts/smoke_prod.py` runs this plus 12 more checks (search resolution for "MHPA" and "zoning", schema, TOTAL MATCHING counts, geocode → zoning chain at City Hall) against any deployment:
 
 ```bash
-pip install aiohttp pyyaml
-python3 scripts/local_server.py      # serves http://localhost:8000/mcp
+python scripts/smoke_prod.py                             # production
+python scripts/smoke_prod.py http://localhost:8000/mcp   # local
 ```
 
-On startup it connects to the live portal and registers the eight `arcgis__*` tools. Worcester's portal is public, so **no API token is required**. (On a Windows console you may need `PYTHONUTF8=1` for the startup banner's emoji.)
-
-See [Getting Started](docs/GETTING_STARTED.md) for the generic OpenContext setup.
-
----
-
-## Deploy & operate (Worcester)
-
-Production runs on AWS Lambda + API Gateway behind `worcester-gis.codeforanchorage.org`, in `us-west-2`.
-
-**First-time bootstrap** (state backend, once per account):
+## Local development
 
 ```bash
-cd terraform/bootstrap
-terraform init
-terraform apply \
-  -var="aws_region=us-west-2" \
-  -var="state_bucket_name=worcester-gis-opencontext-tfstate" \
-  -var="lock_table_name=terraform-state-lock"
+uv sync                              # or: pip install -r requirements.txt
+python scripts/crawl_catalog.py      # (re)build plugins/arcgis/catalog.json
+python scripts/local_server.py       # serves http://localhost:8000/mcp
+python -m pytest tests/ -q           # tests
 ```
 
-These three values must match `terraform/aws/backend.tf`.
-
-**Deploy / redeploy** (workspace defaults to `worcester-prod`):
-
-```bash
-./scripts/deploy.sh --environment prod
-```
-
-For a code-only change, that single command is all you need. The first stand-up of a new environment also creates an ACM certificate and an API Gateway custom domain — DNS is managed externally (no Route53), so on the first deploy you must:
-
-1. **Validate the cert.** The first apply errors on `CreateDomainName` ("Certificate is not in an ISSUED state") — expected. Create the ACM validation CNAME (`terraform output acm_validation_cname_name`/`_value`, or read it from `aws acm describe-certificate`), wait for `ISSUED`, then re-run the deploy.
-2. **Point the endpoint.** Create a CNAME `worcester-gis.codeforanchorage.org` → `terraform output -raw custom_domain_target`.
-
----
-
-## Documentation
-
-
-| Doc                                        | Description                                     |
-| ------------------------------------------ | ----------------------------------------------- |
-| [Getting Started](docs/GETTING_STARTED.md) | Setup and usage                                 |
-| [Architecture](docs/ARCHITECTURE.md)       | System design and plugins                       |
-| [Deployment](docs/DEPLOYMENT.md)           | AWS, Terraform, monitoring                      |
-| [Testing](docs/TESTING.md)                 | Local testing (Terminal, Claude, MCP Inspector) |
-
-
----
-
-## Examples
-
-- **Boston OpenData (CKAN):** [examples/boston-opendata/config.yaml](examples/boston-opendata/config.yaml)
-- **Custom plugin:** [examples/custom-plugin/](examples/custom-plugin/)
-
----
-
-## Contributing
-
-Pre-commit hooks (optional):
-
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-Hooks: Ruff, yamllint, gofmt, plus `detect-private-key` and `gitleaks` secret scanning. Run manually: `pre-commit run --all-files`.
-
-> **Never commit secrets.** `config.yaml` is tracked, so any API token belongs in an environment variable referenced via `${ENV_VAR}` (e.g. `token: "${ARCGIS_TOKEN}"`), never inline. The gitleaks hook will block accidental commits of keys/tokens.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-**Author:** Srihari Raman, City of Boston Department of Innovation and Technology
-
-**Worcester fork** maintained for the City of Worcester, MA. OpenContext is MIT-licensed; this fork retains the original attribution above.
+See `CLAUDE.md` and `docs/` for architecture, deployment, and plugin development.

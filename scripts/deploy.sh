@@ -27,7 +27,7 @@ show_usage() {
     echo ""
     echo "Options:"
     echo "  --environment, -e   Deployment environment: staging or prod (required)"
-    echo "  --tfworkspace, -w   Terraform workspace name (default: worcester-staging or worcester-prod)"
+    echo "  --tfworkspace, -w   Terraform workspace name (default: sandiego-city-staging or sandiego-city-prod)"
     echo "  --help, -h          Show this help message"
 }
 
@@ -68,9 +68,9 @@ fi
 # Default workspace per environment when not explicitly provided
 if [ -z "$TF_WORKSPACE" ]; then
     if [ "$ENVIRONMENT" = "prod" ]; then
-        TF_WORKSPACE="worcester-prod"
+        TF_WORKSPACE="sandiego-city-prod"
     else
-        TF_WORKSPACE="worcester-staging"
+        TF_WORKSPACE="sandiego-city-staging"
     fi
 fi
 
