@@ -71,7 +71,8 @@ print(f"Smoke testing: {URL}\n")
 # 1. ping
 try:
     r = rpc("ping")
-    check("ping", r.get("result", {}).get("status") == "ok", str(r.get("result")))
+    # Spec: ping MUST return an empty result object; the response itself is the signal.
+    check("ping", r.get("result") == {}, str(r.get("result")))
 except Exception as e:
     check("ping", False, repr(e))
 

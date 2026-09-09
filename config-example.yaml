@@ -23,6 +23,7 @@
 ---
 # Server metadata
 server_name: "Your Organization OpenData MCP" # e.g., "Boston OpenData MCP"
+server_version: "1.0.0" # reported in initialize -> serverInfo
 description: "Your organization's open data MCP server - Safe, conversational access to your open data"
 organization: "Your Organization Name" # e.g., "City of Boston"
 

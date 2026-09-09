@@ -69,7 +69,7 @@ Quick health check from a terminal:
 curl -sS -X POST https://sandiego-city-gis.codeforanchorage.org/mcp \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-# → {"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}
+# → {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
 ### Tools exposed

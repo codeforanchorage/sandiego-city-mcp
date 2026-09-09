@@ -9,6 +9,7 @@ import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from core.mcp_server import MCPServer
 from server.http_handler import UniversalHTTPHandler, _initialize_server, _load_config
 from core.validators import ConfigurationError
 
@@ -36,6 +37,34 @@ class TestPathValidation:
             status, headers, body = await handler.handle_request(
                 method="POST",
                 path="/mcp",
+                body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+                headers={},
+            )
+
+            assert status == 200
+            mock_init.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_valid_path_mcp_gcc_succeeds(self):
+        """The hardened GCC route shares this handler and must be accepted
+        (its API-key requirement is enforced upstream at API Gateway)."""
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server") as mock_init,
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock(
+                return_value={
+                    "statusCode": 200,
+                    "headers": {},
+                    "body": json.dumps({"result": "success"}),
+                }
+            )
+
+            status, headers, body = await handler.handle_request(
+                method="POST",
+                path="/mcp-gcc",
                 body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
                 headers={},
             )
@@ -167,6 +196,225 @@ class TestMethodValidation:
         assert status == 405
 
 
+class TestOriginValidation:
+    """DNS-rebinding defence: the Origin allowlist is enforced, not just
+    reflected back in CORS headers."""
+
+    PING = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+
+    @pytest.mark.asyncio
+    async def test_disallowed_origin_returns_403_before_routing(self):
+        """A hostile page must not reach the JSON-RPC layer at all."""
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server") as mock_init,
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock()
+
+            status, headers, body = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.PING,
+                headers={"origin": "https://evil.example.com"},
+            )
+
+        assert status == 403
+        assert json.loads(body)["error"]["message"] == "Forbidden origin"
+        # Nothing downstream ran: no server init, no JSON-RPC dispatch.
+        mock_init.assert_not_called()
+        mock_mcp_server.handle_http_request.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_missing_origin_is_allowed(self):
+        """curl, the Go client and Claude Desktop send no Origin at all."""
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server"),
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock(
+                return_value={"statusCode": 200, "headers": {}, "body": "{}"}
+            )
+
+            status, _, _ = await handler.handle_request(
+                method="POST", path="/mcp", body=self.PING, headers={}
+            )
+
+        assert status == 200
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "https://claude.ai",
+            "https://claude.com",
+            "https://console.anthropic.com",
+            "http://localhost:6274",
+            "http://127.0.0.1:6274",
+        ],
+    )
+    async def test_allowlisted_origins_pass(self, origin):
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server"),
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock(
+                return_value={"statusCode": 200, "headers": {}, "body": "{}"}
+            )
+
+            status, headers, _ = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.PING,
+                headers={"origin": origin},
+            )
+
+        assert status == 200
+        assert headers["Access-Control-Allow-Origin"] == origin
+
+    @pytest.mark.asyncio
+    async def test_null_origin_is_rejected(self):
+        """Sandboxed iframes send Origin: null; it is not on the allowlist."""
+        handler = UniversalHTTPHandler()
+
+        with patch("server.http_handler._initialize_server"):
+            status, _, _ = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.PING,
+                headers={"origin": "null"},
+            )
+
+        assert status == 403
+
+
+class TestProtocolVersionHeader:
+    """MCP-Protocol-Version header handling (spec: transports)."""
+
+    PING = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    INITIALIZE = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+
+    @pytest.mark.asyncio
+    async def test_unsupported_version_returns_400(self):
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server"),
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock()
+
+            status, _, body = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.PING,
+                headers={"mcp-protocol-version": "1999-01-01"},
+            )
+
+        assert status == 400
+        error = json.loads(body)["error"]
+        assert error["code"] == -32600
+        assert error["data"]["requested"] == "1999-01-01"
+        assert error["data"]["supported"] == list(MCPServer.SUPPORTED_PROTOCOL_VERSIONS)
+        mock_mcp_server.handle_http_request.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_does_not_return_unsupported_protocol_version_error_code(self):
+        """Deliberately NOT -32022.
+
+        Per the 2026-07-28 compatibility matrix a dual-era client reads a
+        4xx with no recognized MODERN error body as "this is a legacy
+        server" and falls back to the initialize handshake -- which is
+        what this server wants. -32022 would advertise a modern server it
+        is not, and the client would retry instead of falling back.
+        """
+        handler = UniversalHTTPHandler()
+
+        with patch("server.http_handler._initialize_server"):
+            _, _, body = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.PING,
+                headers={"mcp-protocol-version": "2026-07-28"},
+            )
+
+        assert json.loads(body)["error"]["code"] != -32022
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("version", MCPServer.SUPPORTED_PROTOCOL_VERSIONS)
+    async def test_supported_versions_pass(self, version):
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server"),
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock(
+                return_value={"statusCode": 200, "headers": {}, "body": "{}"}
+            )
+
+            status, _, _ = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.PING,
+                headers={"mcp-protocol-version": version},
+            )
+
+        assert status == 200
+
+    @pytest.mark.asyncio
+    async def test_absent_header_is_not_an_error(self):
+        """Spec: with no header the server SHOULD assume 2025-03-26."""
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server"),
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock(
+                return_value={"statusCode": 200, "headers": {}, "body": "{}"}
+            )
+
+            status, _, _ = await handler.handle_request(
+                method="POST", path="/mcp", body=self.PING, headers={}
+            )
+
+        assert status == 200
+        assert UniversalHTTPHandler.ASSUMED_PROTOCOL_VERSION == "2025-03-26"
+
+    @pytest.mark.asyncio
+    async def test_initialize_is_exempt_from_the_header_check(self):
+        """initialize negotiates the version in its BODY.
+
+        Rejecting an unsupported header here would deadlock a client whose
+        first attempt names a revision we do not support: it could never
+        reach the handshake that would settle on one we do.
+        """
+        handler = UniversalHTTPHandler()
+
+        with (
+            patch("server.http_handler._initialize_server"),
+            patch("server.http_handler._mcp_server") as mock_mcp_server,
+        ):
+            mock_mcp_server.handle_http_request = AsyncMock(
+                return_value={"statusCode": 200, "headers": {}, "body": "{}"}
+            )
+
+            status, _, _ = await handler.handle_request(
+                method="POST",
+                path="/mcp",
+                body=self.INITIALIZE,
+                headers={"mcp-protocol-version": "2026-07-28"},
+            )
+
+        assert status == 200
+
+
 class TestCORS:
     """Test CORS handling."""
 
@@ -197,13 +445,11 @@ class TestCORS:
             # No Origin sent → default-origin (claude.ai) is reflected.
             assert headers["Access-Control-Allow-Origin"] == "https://claude.ai"
             assert headers["Vary"] == "Origin"
-            assert (
-                headers["Access-Control-Allow-Methods"]
-                == "POST, OPTIONS"
-            )
+            assert headers["Access-Control-Allow-Methods"] == "POST, OPTIONS"
             assert (
                 headers["Access-Control-Allow-Headers"]
-                == "content-type, accept, mcp-session-id"
+                == "content-type, accept, mcp-session-id, "
+                "mcp-protocol-version, mcp-method, mcp-name"
             )
 
     def test_handle_options_returns_cors_headers(self):
@@ -216,13 +462,11 @@ class TestCORS:
         # No Origin sent → default-origin reflected.
         assert headers["Access-Control-Allow-Origin"] == "https://claude.ai"
         assert headers["Vary"] == "Origin"
-        assert (
-            headers["Access-Control-Allow-Methods"]
-            == "POST, OPTIONS"
-        )
+        assert headers["Access-Control-Allow-Methods"] == "POST, OPTIONS"
         assert (
             headers["Access-Control-Allow-Headers"]
-            == "content-type, accept, mcp-session-id"
+            == "content-type, accept, mcp-session-id, "
+            "mcp-protocol-version, mcp-method, mcp-name"
         )
         assert headers["Access-Control-Max-Age"] == "86400"
         assert body == ""
@@ -239,10 +483,7 @@ class TestCORS:
         _status, headers, _body = handler.handle_options(
             request_origin="https://console.anthropic.com"
         )
-        assert (
-            headers["Access-Control-Allow-Origin"]
-            == "https://console.anthropic.com"
-        )
+        assert headers["Access-Control-Allow-Origin"] == "https://console.anthropic.com"
 
     def test_handle_options_falls_back_for_unknown_origin(self):
         """Unknown origins do NOT get reflected — default origin is used."""
@@ -252,10 +493,7 @@ class TestCORS:
             request_origin="https://attacker.example.com"
         )
         assert headers["Access-Control-Allow-Origin"] == "https://claude.ai"
-        assert (
-            "attacker.example.com"
-            not in headers["Access-Control-Allow-Origin"]
-        )
+        assert "attacker.example.com" not in headers["Access-Control-Allow-Origin"]
 
 
 class TestSessionID:
@@ -486,7 +724,9 @@ class TestConfigLoading:
             server.http_handler._config = None
 
             _load_config()
-            mock_load.assert_called_once_with("config.yaml")
+            import server.http_handler as _h
+
+            mock_load.assert_called_once_with(_h._packaged_config_path())
 
     def test_load_config_raises_on_invalid_json(self):
         """Test that invalid JSON in environment variable raises error."""

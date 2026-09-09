@@ -11,6 +11,20 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ToolInputError(ValueError):
+    """A tool argument the CALLER got wrong.
+
+    Distinguishes "you asked for something invalid" from "this server or
+    its upstream broke". Callers of ``execute_tool`` log these at WARNING
+    with no traceback: a bad parcel number or an unparseable WHERE clause
+    is not a server incident, and a stack trace for one buries the real
+    faults in the log.
+
+    Subclasses ValueError so existing ``except ValueError`` handlers keep
+    working unchanged.
+    """
+
+
 class PluginType(str, Enum):
     """Types of plugins supported by OpenContext."""
 
@@ -24,9 +38,39 @@ class ToolDefinition(BaseModel):
     """Definition of an MCP tool provided by a plugin."""
 
     name: str = Field(..., description="Tool name (without plugin prefix)")
+    title: Optional[str] = Field(
+        default=None,
+        description=(
+            "Short human-readable display name. This is a TOP-LEVEL field "
+            "on the MCP Tool type (via BaseMetadata), NOT an annotation. "
+            "Client display precedence is title -> annotations.title -> "
+            "name; the wire `name` is plugin-prefixed and reads badly in "
+            "a tool picker, so set this on every tool."
+        ),
+    )
     description: str = Field(..., description="Human-readable tool description")
     input_schema: Dict[str, Any] = Field(
         ..., description="JSON Schema for tool input parameters"
+    )
+    output_schema: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Optional JSON Schema for the tool's structuredContent. "
+            "A declared schema is BINDING: the spec says servers MUST "
+            "return conforming results and clients SHOULD validate them. "
+            "Declare one only if EVERY return path of the tool emits "
+            "conforming structured content -- including the empty, "
+            "truncated and not-found branches."
+        ),
+    )
+    annotations: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Optional MCP tool annotations (e.g. readOnlyHint, "
+            "openWorldHint) that hint at a tool's behavior to clients. "
+            "Do NOT set idempotentHint on a read-only tool: the schema "
+            "documents it as meaningful only when readOnlyHint is false."
+        ),
     )
 
 
@@ -37,6 +81,13 @@ class ToolResult(BaseModel):
         default_factory=list, description="Tool output content"
     )
     success: bool = Field(..., description="Whether the tool execution succeeded")
+    structured_content: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Machine-readable result, surfaced as `structuredContent`. "
+            "Must conform to the tool's declared output_schema."
+        ),
+    )
     error_message: Optional[str] = Field(
         None, description="Error message if execution failed"
     )
