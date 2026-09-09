@@ -51,7 +51,9 @@ instructions: |
   lat directly (WGS84 decimal degrees, lon FIRST, e.g. lon=-117.16,
   lat=32.72). All coordinates in and out are WGS84 -- the layers are
   authored in State Plane feet but the server handles the conversion.
-  geocode_address(address) is available on its own.
+  If the geocoded point lands in the street and hits no polygon, the
+  lookup retries once within 10 m and flags it with an address_snapped
+  caveat. geocode_address(address) is available on its own.
 
   Key layers, all in Planning/PLN_LongRangePlanning/MapServer:
     /7  Multi-Habitat Planning Area (MHPA) -- fields HABPRES, INHABPRES,

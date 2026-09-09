@@ -112,9 +112,6 @@ CAVEAT_CODES = (
     "live_metadata",
     "geocoded",
     "multiple_geocode_matches",
-    # Emitted by the SANDAG fork's address-snap retry (features within a few
-    # metres of a geocoded point). Reserved here so the caveat enum in the
-    # advertised outputSchema is identical across the GIS forks.
     "address_snapped",
     "no_results",
 )
@@ -428,7 +425,7 @@ _OUTPUT_SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
     ),
     "spatial_query_point": _envelope_schema(
-        "Polygons containing a point.",
+        "Polygons containing (or, when snapped, within a few metres of) a point.",
         {
             "item_id": {"type": "string"},
             "lon": {"type": "number"},
@@ -445,6 +442,13 @@ _OUTPUT_SCHEMAS: Dict[str, Dict[str, Any]] = {
         {
             "returned": {"type": "integer"},
             "geocoded": {"type": "boolean"},
+            "snapped_to_meters": {
+                "type": ["integer", "null"],
+                "description": (
+                    "Set when no polygon contained the geocoded point and the "
+                    "result is polygons within this many metres instead."
+                ),
+            },
             "truncated": {
                 "type": "boolean",
                 "description": "True when the result hit `limit`.",
@@ -492,6 +496,14 @@ class ArcGISPlugin(DataPlugin):
     plugin_name = "arcgis"
     plugin_type = PluginType.OPEN_DATA
     plugin_version = "2.0.0"
+
+    # Retry radius for address-form spatial_query_point when the geocoded
+    # point hits nothing. Geocoders place addresses on the street
+    # centerline, and City polygon layers (zoning, plan areas) can leave
+    # the right-of-way unclassified. Same value as the SANDAG fork, where
+    # 10 m recovered the named parcel at City Hall and 20 m already pulled
+    # in unrelated lots across the block.
+    _ADDRESS_SNAP_METERS = 10
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
@@ -794,8 +806,10 @@ class ArcGISPlugin(DataPlugin):
                     "automatically) OR both `lon` and `lat` (WGS84 decimal "
                     "degrees -- the plugin handles the State Plane "
                     "conversion server-side). Use on polygon layers (check "
-                    "geometry with get_layer_schema). Returns attributes "
-                    "only, no geometry."
+                    "geometry with get_layer_schema). If a geocoded address "
+                    "falls in the street and hits no polygon, the lookup "
+                    "retries once within 10 m and flags it (address_snapped). "
+                    "Returns attributes only, no geometry."
                 ),
                 input_schema={
                     "type": "object",
@@ -1248,6 +1262,29 @@ class ArcGISPlugin(DataPlugin):
         records = await self.spatial_query_point(
             item_id, lon, lat, where, out_fields, limit
         )
+        snapped: Optional[int] = None
+        if not records and matched_address is not None:
+            # Geocoders place addresses on the street centerline, so the
+            # point can fall in the right-of-way just outside the polygon
+            # it names. Retry once within a few metres; the caveat keeps
+            # the caller honest about what was matched.
+            records = await self.spatial_query_point(
+                item_id,
+                lon,
+                lat,
+                where,
+                out_fields,
+                limit,
+                distance_m=self._ADDRESS_SNAP_METERS,
+            )
+            if records:
+                snapped = self._ADDRESS_SNAP_METERS
+                caveats.add(
+                    "address_snapped",
+                    f"No polygon contains the geocoded point exactly; showing "
+                    f"polygons within {snapped} m of it (geocoders place "
+                    f"addresses on the street centerline).",
+                )
         truncated = len(records) >= limit
         if truncated:
             caveats.add(
@@ -1276,6 +1313,7 @@ class ArcGISPlugin(DataPlugin):
             {
                 "returned": len(records),
                 "geocoded": matched_address is not None,
+                "snapped_to_meters": snapped,
                 "truncated": truncated,
             },
             caveats,
@@ -1658,7 +1696,10 @@ class ArcGISPlugin(DataPlugin):
         where: str = "1=1",
         out_fields: str = "*",
         limit: int = 10,
+        distance_m: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
+        """Polygons intersecting a WGS84 point. With `distance_m`, polygons
+        within that many metres of the point instead (server-side buffer)."""
         if not -180 <= lon <= 180:
             raise ToolInputError(f"lon must be between -180 and 180 (got {lon})")
         if not -90 <= lat <= 90:
@@ -1680,6 +1721,9 @@ class ArcGISPlugin(DataPlugin):
             "resultRecordCount": min(max(limit, 1), 50),
             "f": "json",
         }
+        if distance_m:
+            params["distance"] = distance_m
+            params["units"] = "esriSRUnit_Meter"
         data = await self._query_layer(layer_url, params)
         return [f.get("attributes", {}) for f in data.get("features", [])]
 

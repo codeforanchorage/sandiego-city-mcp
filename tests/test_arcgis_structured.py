@@ -15,7 +15,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from core.plugin_manager import PluginManager
-from plugins.arcgis.plugin import CAVEAT_CODES
+from plugins.arcgis.plugin import CAVEAT_CODES, ArcGISPlugin
 from tests.test_arcgis_plugin import (
     FEATURED,
     MHPA_ID,
@@ -484,10 +484,37 @@ class TestSpatialQueryPoint:
         )
         s = assert_conforms(plugin, "spatial_query_point", result)
         assert s["summary"]["geocoded"] is True
+        assert s["summary"]["snapped_to_meters"] is None
         assert s["query"]["matched_address"].startswith("202 C ST, SAN DIEGO")
         assert s["query"]["lon"] == -117.163
         assert codes(s) == ["geocoded", "multiple_geocode_matches"]
         assert "Geocoded '202 C St'" in result.content[0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_by_address_snapped_with_multiple_matches(self, arcgis_config):
+        plugin = make_plugin(arcgis_config)
+        plugin.feature_client.get = AsyncMock(
+            side_effect=[
+                geocode(
+                    ("202 C ST, SAN DIEGO, CA, 92101", -117.163, 32.717),
+                    ("202 C ST, CHULA VISTA, CA, 91910", -117.08, 32.64),
+                ),
+                page([]),  # exact hit misses (street centerline)
+                page([{"ZONE_NAME": "CCPD-CORE"}]),  # 10 m snap retry
+            ]
+        )
+        result = await plugin.execute_tool(
+            "spatial_query_point", {"item_id": ZONES_ID, "address": "202 C St"}
+        )
+        s = assert_conforms(plugin, "spatial_query_point", result)
+        assert s["summary"]["geocoded"] is True
+        assert s["summary"]["snapped_to_meters"] == ArcGISPlugin._ADDRESS_SNAP_METERS
+        assert s["rows"] == [{"ZONE_NAME": "CCPD-CORE"}]
+        assert codes(s) == ["geocoded", "multiple_geocode_matches", "address_snapped"]
+        retry = plugin.feature_client.get.await_args_list[2].kwargs["params"]
+        assert retry["distance"] == ArcGISPlugin._ADDRESS_SNAP_METERS
+        assert retry["units"] == "esriSRUnit_Meter"
+        assert "within 10 m" in result.content[0]["text"]
 
     @pytest.mark.asyncio
     async def test_address_not_found_is_a_caller_error(self, arcgis_config):
@@ -509,7 +536,10 @@ class TestSpatialQueryPoint:
         )
         s = assert_conforms(plugin, "spatial_query_point", result)
         assert s["rows"] == []
+        assert s["summary"]["snapped_to_meters"] is None
         assert codes(s) == ["no_results"]
+        # Explicit coordinates are taken at face value: no snap retry.
+        assert plugin.feature_client.get.await_count == 1
 
     @pytest.mark.asyncio
     async def test_limit_clamped_and_truncated(self, arcgis_config):

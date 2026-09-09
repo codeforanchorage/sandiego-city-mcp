@@ -697,6 +697,57 @@ class TestSpatialQueryPoint:
         text = result.content[0]["text"]
         assert "Geocoded '202 C St'" in text
         assert "CC-5-5" in text
+        # Point hit a polygon: no snap retry.
+        assert plugin.feature_client.get.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_spatial_query_point_address_miss_retries_within_snap_radius(
+        self, arcgis_config
+    ):
+        """A geocoded point in the street right-of-way hits no polygon; the
+        tool retries once within the snap radius and says so."""
+        plugin = make_plugin(arcgis_config)
+        plugin.geocode_address = AsyncMock(
+            return_value=[
+                {"matched_address": "202 C ST", "lon": -117.1628, "lat": 32.7168}
+            ]
+        )
+        plugin.spatial_query_point = AsyncMock(
+            side_effect=[[], [{"ZONE_NAME": "CCPD-CORE"}]]
+        )
+        result = await plugin.execute_tool(
+            "spatial_query_point", {"item_id": ZONES_ID, "address": "202 C St"}
+        )
+        assert result.success is True
+        calls = plugin.spatial_query_point.call_args_list
+        assert len(calls) == 2
+        assert "distance_m" not in calls[0].kwargs
+        assert calls[1].kwargs["distance_m"] == 10
+        text = result.content[0]["text"]
+        assert "within 10 m" in text
+        assert "CCPD-CORE" in text
+
+    @pytest.mark.asyncio
+    async def test_spatial_query_point_lonlat_miss_does_not_retry(self, arcgis_config):
+        """Explicit coordinates are taken at face value: no snap retry."""
+        plugin = make_plugin(arcgis_config)
+        plugin.spatial_query_point = AsyncMock(return_value=[])
+        result = await plugin.execute_tool(
+            "spatial_query_point", {"item_id": ZONES_ID, "lon": -117.16, "lat": 32.72}
+        )
+        assert result.success is True
+        assert plugin.spatial_query_point.call_count == 1
+        assert "Returned 0 record(s)" in result.content[0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_point_query_distance_buffer_params(self, arcgis_config):
+        plugin = make_plugin(arcgis_config)
+        plugin.feature_client.get = AsyncMock(return_value=_page([]))
+        await plugin.spatial_query_point(ZONES_ID, -117.16, 32.72, distance_m=10)
+        params = plugin.feature_client.get.await_args.kwargs["params"]
+        assert params["distance"] == 10
+        assert params["units"] == "esriSRUnit_Meter"
+        assert params["inSR"] == 4326
 
     @pytest.mark.asyncio
     async def test_execute_spatial_requires_point_or_address(self, arcgis_config):
