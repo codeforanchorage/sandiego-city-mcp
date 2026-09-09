@@ -61,12 +61,13 @@ instructions: |
   get_aggregations(field='folder') shows how the catalog is organised.
 
   Limits: the catalog is a snapshot (see get_dataset for the crawl date);
-  ~15 services (AMPGIS, GetItDone, PUD_*, ...) require a City login and
+  ~18 services (AMPGIS, GetItDone, PUD_*, ...) require a City login and
   are not indexed. County-wide and regional layers (parcels, SanGIS,
   SANDAG) live on the separate San Diego Regional GIS MCP server, which
   exposes the SAME tool names -- use it for anything outside City
-  services. Field names are case-sensitive; an unknown field returns a
-  did-you-mean suggestion rather than results.
+  services. Field names are case-sensitive; a misspelled field makes
+  ArcGIS reject the whole query, so confirm names with get_layer_schema
+  before filtering.
 
 # Plugin configuration
 # ====================

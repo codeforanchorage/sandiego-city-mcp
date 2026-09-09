@@ -95,7 +95,7 @@ class WhereValidator:
             The original WHERE clause if valid, or "1=1" if empty/None
 
         Raises:
-            ValueError: If the clause contains forbidden SQL keywords or
+            ToolInputError: If the clause contains forbidden SQL keywords or
                 suspicious substrings (stacked queries, comments, etc.)
                 outside of quoted string literals, or an unbalanced
                 quote.
@@ -228,7 +228,7 @@ class WhereValidator:
                 failed -- graceful degradation).
 
         Raises:
-            ValueError: When the WHERE references an identifier that
+            ToolInputError: When the WHERE references an identifier that
                 isn't in ``allowed_fields`` and isn't a SQL keyword or
                 function from ``SQL_RESERVED``.
         """
@@ -280,6 +280,12 @@ class OutFieldsValidator:
 
     _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     MAX_FIELDS = 100
+
+    @classmethod
+    def is_identifier(cls, value: str) -> bool:
+        """True when ``value`` is one bare field identifier (no list, no
+        wildcard, no expression)."""
+        return isinstance(value, str) and bool(cls._IDENT.match(value.strip()))
 
     @classmethod
     def validate(cls, out_fields: str) -> str:

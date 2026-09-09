@@ -626,6 +626,19 @@ class TestSchemaAndDistinct:
         assert params["returnDistinctValues"] == "true"
 
     @pytest.mark.asyncio
+    async def test_get_distinct_values_rejects_non_identifier_field(
+        self, arcgis_config
+    ):
+        """`field` is spliced into outFields, orderByFields and the WHERE
+        clause after WHERE validation, so it must be one bare identifier."""
+        plugin = make_plugin(arcgis_config)
+        plugin.feature_client.get = AsyncMock(return_value=_page([]))
+        for bad in ("ZONE_NAME, ACRES", "ZONE_NAME; DROP", "*", "1=1 OR", ""):
+            with pytest.raises(ToolInputError, match="single field name"):
+                await plugin.get_distinct_values(ZONES_ID, bad)
+        plugin.feature_client.get.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_get_distinct_values_like_escapes_quotes(self, arcgis_config):
         plugin = make_plugin(arcgis_config)
         plugin.feature_client.get = AsyncMock(return_value=_page([]))

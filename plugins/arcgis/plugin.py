@@ -112,6 +112,10 @@ CAVEAT_CODES = (
     "live_metadata",
     "geocoded",
     "multiple_geocode_matches",
+    # Emitted by the SANDAG fork's address-snap retry (features within a few
+    # metres of a geocoded point). Reserved here so the caveat enum in the
+    # advertised outputSchema is identical across the GIS forks.
+    "address_snapped",
     "no_results",
 )
 
@@ -1093,8 +1097,8 @@ class ArcGISPlugin(DataPlugin):
             total = None
             caveats.add(
                 "count_unavailable",
-                "TOTAL MATCHING is unavailable: the count query failed, so "
-                "the total is unknown (not zero).",
+                "The total match count is unavailable: the count query "
+                "failed, so the total is unknown (not zero).",
             )
         if meta["live_metadata"]:
             caveats.add("live_metadata", _LIVE_NOTE)
@@ -1609,6 +1613,15 @@ class ArcGISPlugin(DataPlugin):
         limit: int = 200,
     ) -> List[Any]:
         layer_url = self._layer_url_for_item(item_id)
+        # `field` lands in outFields, orderByFields AND the WHERE clause,
+        # after the WHERE has already been validated -- so it must be a
+        # single bare identifier, not a list and not an expression.
+        if not OutFieldsValidator.is_identifier(field):
+            raise ToolInputError(
+                f"field must be a single field name (got {field!r}); "
+                "see get_layer_schema."
+            )
+        field = field.strip()
         where_clause = WhereValidator.validate(where)
         if like:
             safe_like = like.replace("'", "''")

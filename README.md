@@ -21,9 +21,9 @@ It is a **sibling** to the San Diego regional (SANDAG/SanGIS) and Worcester serv
 `webmaps.sandiego.gov` is a **bare services directory** — there is no ArcGIS Hub / Open Data catalog in front of it, so the Hub-search discovery used by the Worcester fork does not apply. Instead:
 
 1. `scripts/crawl_catalog.py` walks the directory offline: folders → MapServer/FeatureServer services → each service's `/layers?f=json`, capturing layer id, name, geometry type, description, extent, and `maxRecordCount`.
-2. The result is serialized to **`plugins/arcgis/catalog.json`** — a versioned, diffable deploy artifact (~718 layers from 329 services at last crawl).
+2. The result is serialized to **`plugins/arcgis/catalog.json`** — a versioned, diffable deploy artifact (708 layers from 327 services at the 2026-09-09 crawl).
 3. The running server loads that manifest at startup — instant, no live crawl, no cold-start penalty. `search_datasets` does substring/fuzzy/acronym matching over it.
-4. Services that require an ArcGIS account (HTTP 401/403 or ArcGIS error codes 498/499) are skipped during the crawl and recorded in the manifest's `skipped` list — 15 folders on this host at last crawl (AMPGIS, GetItDone, TED, …).
+4. Services that require an ArcGIS account (HTTP 401/403 or ArcGIS error codes 498/499) are skipped during the crawl and recorded in the manifest's `skipped` list — 18 services on this host at last crawl (AMPGIS, GetItDone, TED, the PUD_* services, four legacy aerials, …).
 
 **To refresh the catalog:** `python scripts/crawl_catalog.py`, review the diff, commit, redeploy.
 
@@ -119,7 +119,7 @@ Record 1:
   ACRES: 2734.79
 ```
 
-`scripts/smoke_prod.py` runs this plus 12 more checks (search resolution for "MHPA" and "zoning", schema, TOTAL MATCHING counts, geocode → zoning chain at City Hall) against any deployment:
+`scripts/smoke_prod.py` runs this plus the search ("MHPA", "zoning"), schema, TOTAL MATCHING, geocode → zoning chain at City Hall, structured-output, and MCP conformance checks against any deployment:
 
 ```bash
 python scripts/smoke_prod.py                             # production
