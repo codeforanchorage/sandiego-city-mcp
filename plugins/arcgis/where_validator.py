@@ -255,9 +255,19 @@ class WhereValidator:
             return
 
         sorted_allowed = sorted(allowed_set)
+        # A case-only miss (zone_name for ZONE_NAME) is the commonest LLM
+        # slip and difflib scores it badly, so resolve it explicitly first.
+        by_lower: dict = {}
+        for name in sorted_allowed:
+            by_lower.setdefault(name.lower(), name)
         parts = []
         for u in unknown:
-            suggestions = difflib.get_close_matches(u, sorted_allowed, n=1, cutoff=0.6)
+            exact_ci = by_lower.get(u.lower())
+            suggestions = (
+                [exact_ci]
+                if exact_ci
+                else difflib.get_close_matches(u, sorted_allowed, n=1, cutoff=0.6)
+            )
             if suggestions:
                 parts.append(
                     f"Field {u!r} not found in this layer -- did you "

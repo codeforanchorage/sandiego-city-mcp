@@ -321,7 +321,9 @@ class TestQueryData:
     @pytest.mark.asyncio
     async def test_empty(self, arcgis_config):
         plugin = make_plugin(arcgis_config)
-        plugin.feature_client.get = AsyncMock(side_effect=[page([]), count(0)])
+        plugin.feature_client.get = AsyncMock(
+            side_effect=[mock_response(LAYER_META), page([]), count(0)]
+        )
         result = await plugin.execute_tool(
             "query_data", {"dataset_id": ZONES_ID, "where": "ZONE_NAME = 'nope'"}
         )
@@ -330,6 +332,57 @@ class TestQueryData:
         assert s["summary"]["total_matching"] == 0
         assert codes(s) == ["no_results"]
         assert "TOTAL MATCHING: 0" in result.content[0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_where_field_is_a_caller_error_with_suggestion(
+        self, arcgis_config
+    ):
+        """The schema is read BEFORE the query; a misspelled field never
+        reaches ArcGIS and the caller gets a did-you-mean instead of a 400."""
+        plugin = make_plugin(arcgis_config)
+        plugin.feature_client.get = AsyncMock(side_effect=[mock_response(LAYER_META)])
+        result = await plugin.execute_tool(
+            "query_data", {"dataset_id": ZONES_ID, "where": "zone_name = 'RS-1-7'"}
+        )
+        assert result.success is False
+        assert result.structured_content is None
+        assert "did you mean 'ZONE_NAME'" in result.error_message
+        assert plugin.feature_client.get.await_count == 1  # schema only, no query
+
+    @pytest.mark.asyncio
+    async def test_schema_is_cached_and_where_1eq1_skips_it(self, arcgis_config):
+        plugin = make_plugin(arcgis_config)
+        plugin.feature_client.get = AsyncMock(
+            side_effect=[
+                mock_response(LAYER_META),  # schema, first non-trivial WHERE
+                page([{"ZONE_NAME": "RS-1-7"}]),
+                count(1),
+                page([{"ZONE_NAME": "RS-1-7"}]),  # second query: schema cached
+                count(1),
+                page([{"ZONE_NAME": "RS-1-7"}]),  # where=1=1: no schema needed
+                count(1),
+            ]
+        )
+        for where in ("ZONE_NAME = 'RS-1-7'", "STATUS = 1", "1=1"):
+            result = await plugin.execute_tool(
+                "query_data", {"dataset_id": ZONES_ID, "where": where}
+            )
+            assert result.success is True, where
+        assert plugin.feature_client.get.await_count == 7
+
+    @pytest.mark.asyncio
+    async def test_schema_fetch_failure_degrades_to_no_check(self, arcgis_config):
+        """A metadata hiccup must not block a query ArcGIS would accept."""
+        plugin = make_plugin(arcgis_config)
+        plugin.feature_client.get = AsyncMock(
+            side_effect=[RuntimeError("metadata down"), page([{"A": 1}]), count(1)]
+        )
+        result = await plugin.execute_tool(
+            "query_data", {"dataset_id": ZONES_ID, "where": "ANYTHING = 1"}
+        )
+        s = assert_conforms(plugin, "query_data", result)
+        assert s["rows"] == [{"A": 1}]
+        assert codes(s) == []
 
     @pytest.mark.asyncio
     async def test_page_cap_reached(self, arcgis_config):

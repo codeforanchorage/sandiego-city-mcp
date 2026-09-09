@@ -514,6 +514,10 @@ class ArcGISPlugin(DataPlugin):
         # published after the last crawl) get their metadata fetched live
         # once and cached here for the life of the instance.
         self._live_meta_cache: Dict[str, Dict[str, Any]] = {}
+        # Field names per layer, fetched once per instance so the WHERE
+        # field-name check costs one extra round-trip per layer, not per
+        # query (warm Lambdas keep it across invocations).
+        self._fields_cache: Dict[str, List[str]] = {}
         self._catalog_generated_at: Optional[str] = None
 
     async def initialize(self) -> bool:
@@ -1483,6 +1487,13 @@ class ArcGISPlugin(DataPlugin):
 
         where_clause = filters.get("where", "1=1") if filters else "1=1"
         where_clause = WhereValidator.validate(where_clause)
+        if where_clause != "1=1":
+            # A misspelled field is a hallucination magnet for LLM callers
+            # and ArcGIS answers it with an opaque 400. Check the identifiers
+            # against the real schema first and answer with a did-you-mean.
+            WhereValidator.validate_against_schema(
+                where_clause, await self._field_names_for(resource_id)
+            )
         out_fields = OutFieldsValidator.validate(
             filters.get("out_fields", "*") if filters else "*"
         )
@@ -1547,6 +1558,32 @@ class ArcGISPlugin(DataPlugin):
             meta["page_cap_reached"] = True
 
         return records[:limit], meta
+
+    async def _field_names_for(self, dataset_id: str) -> Optional[List[str]]:
+        """Field names of a layer, cached per instance.
+
+        Returns None when the schema cannot be read, which makes
+        ``validate_against_schema`` skip the check: a metadata hiccup must
+        never block a query that ArcGIS itself would have accepted.
+        """
+        cached = self._fields_cache.get(dataset_id)
+        if cached is not None:
+            return cached
+        try:
+            schema = await self.get_layer_schema(dataset_id)
+        except Exception as schema_err:
+            logger.warning(
+                f"Could not read the schema for {dataset_id}; skipping the "
+                f"WHERE field-name check: {schema_err}"
+            )
+            return None
+        names = [
+            f["name"]
+            for f in schema.get("fields", []) or []
+            if isinstance(f, dict) and f.get("name")
+        ]
+        self._fields_cache[dataset_id] = names
+        return names
 
     # ── Aggregations (catalog facets, not a DataPlugin method) ──────────
 

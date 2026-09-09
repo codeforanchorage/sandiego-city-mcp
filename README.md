@@ -80,7 +80,7 @@ curl -sS -X POST https://sandiego-city-gis.codeforanchorage.org/mcp \
 | `arcgis__get_dataset` | Fetch a layer's metadata: geometry type, record cap, extent, layer URL |
 | `arcgis__get_layer_schema` | List a layer's fields (name, type, alias, coded values), optionally filtered by `keyword` |
 | `arcgis__get_distinct_values` | List the distinct values in a field (with optional `like` / `where`) to confirm exact codes |
-| `arcgis__query_data` | Query features (supports `where`, `out_fields`, `order_by`, `limit`). Output leads with a `TOTAL MATCHING` count, so "how many X?" needs no paging. Auto-paginates past per-layer record caps |
+| `arcgis__query_data` | Query features (supports `where`, `out_fields`, `order_by`, `limit`). Output leads with a `TOTAL MATCHING` count, so "how many X?" needs no paging. Auto-paginates past per-layer record caps. A misspelled `where` field is rejected before the query with a did-you-mean |
 | `arcgis__spatial_query_point` | Point-in-polygon: which polygon(s) contain a point — by `lon`/`lat` (WGS84) **or** a street `address` |
 | `arcgis__geocode_address` | Convert a street address to `lon`/`lat` (US Census geocoder, biased to San Diego) |
 | `arcgis__get_aggregations` | Facet counts of the catalog by `folder`, `service`, `service_type`, or `geometry_type` |

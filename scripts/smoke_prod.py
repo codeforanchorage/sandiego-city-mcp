@@ -234,6 +234,16 @@ try:
 except Exception as e:
     check("query_data where+order_by (TOTAL MATCHING)", False, repr(e))
 
+# 8b. query_data with a misspelled field -- rejected BEFORE the query with a
+#     did-you-mean, not an opaque ArcGIS 400.
+try:
+    r = call_tool("query_data", {"dataset_id": MHPA_ID, "where": "habpres >= 90"})
+    t = text_of(r)
+    ok = bool(r.get("isError")) and "did you mean 'HABPRES'" in t
+    check("query_data unknown field -> did-you-mean", ok, t[:70])
+except Exception as e:
+    check("query_data unknown field -> did-you-mean", False, repr(e))
+
 # 9. VERIFICATION QUERY -- WGS84 point-in-polygon on MHPA at the Tijuana
 #    River Valley (32.5539, -117.0846). This point returns null on the
 #    regional (SANDAG) server's County MSCP_CN layer but sits inside a City

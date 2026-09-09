@@ -67,9 +67,9 @@ instructions: |
   are not indexed. County-wide and regional layers (parcels, SanGIS,
   SANDAG) live on the separate San Diego Regional GIS MCP server, which
   exposes the SAME tool names -- use it for anything outside City
-  services. Field names are case-sensitive; a misspelled field makes
-  ArcGIS reject the whole query, so confirm names with get_layer_schema
-  before filtering.
+  services. Field names are case-sensitive; a misspelled field in
+  `where` is rejected before the query runs, with a did-you-mean
+  suggestion (get_layer_schema lists every field).
 
 # Plugin configuration
 # ====================
