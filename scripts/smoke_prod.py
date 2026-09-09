@@ -27,6 +27,11 @@ import time
 import urllib.error
 import urllib.request
 
+try:  # optional: full schema validation when jsonschema is installed
+    from jsonschema import Draft202012Validator
+except ImportError:  # pragma: no cover
+    Draft202012Validator = None
+
 URL = (
     (sys.argv[1] if len(sys.argv) > 1 else None)
     or os.environ.get("OPENCONTEXT_SMOKE_URL")
@@ -447,6 +452,98 @@ try:
     check("tools/list is deterministic", a == b, f"{len(a)} tools")
 except Exception as e:
     check("tools/list is deterministic", False, repr(e))
+
+# ── Structured output (outputSchema is BINDING) ───────────────────────
+# Validate LIVE structuredContent against the outputSchema the server
+# itself advertises -- across the awkward branches (an empty search, a
+# truncated query, a geocoded point lookup), not just the happy path --
+# and assert every structured caveat appears verbatim in the prose.
+
+
+def check_structured(label, tool, args, expect_codes=None):
+    try:
+        r = call_tool(tool, args)
+        res = r["result"]
+        sc = res.get("structuredContent")
+        schema = tools_by_name[f"arcgis__{tool}"].get("outputSchema")
+        problems = []
+        if not sc:
+            problems.append("no structuredContent")
+        if not schema:
+            problems.append("no outputSchema advertised")
+        if sc and schema:
+            if Draft202012Validator is not None:
+                errs = list(Draft202012Validator(schema).iter_errors(sc))
+                problems += [f"schema: {e.message}" for e in errs[:3]]
+            else:
+                missing = [k for k in schema.get("required", []) if k not in sc]
+                if missing:
+                    problems.append(f"missing keys {missing}")
+            text = res["content"][0]["text"]
+            for c in sc.get("caveats", []):
+                if c["message"] not in text:
+                    problems.append(f"caveat {c['code']} absent from prose")
+            got = [c["code"] for c in sc.get("caveats", [])]
+            for code in expect_codes or []:
+                if code not in got:
+                    problems.append(f"expected caveat {code}, got {got}")
+        detail = (
+            "; ".join(problems)
+            if problems
+            else f"caveats={[c['code'] for c in sc.get('caveats', [])]}"
+        )
+        check(label, not problems, detail)
+    except Exception as e:
+        check(label, False, repr(e))
+
+
+try:
+    tools_by_name = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}
+except Exception as e:  # pragma: no cover
+    tools_by_name = {}
+    check("tools/list for structured checks", False, repr(e))
+
+check_structured("structured: search_datasets hit", "search_datasets", {"q": "MHPA"})
+check_structured(
+    "structured: search_datasets empty",
+    "search_datasets",
+    {"q": "qwzxjvplk"},
+    expect_codes=["no_results"],
+)
+check_structured("structured: get_dataset", "get_dataset", {"dataset_id": MHPA_ID})
+check_structured(
+    "structured: get_aggregations", "get_aggregations", {"field": "folder"}
+)
+check_structured(
+    "structured: query_data truncated",
+    "query_data",
+    {
+        "dataset_id": MHPA_ID,
+        "where": "HABPRES >= 90",
+        "out_fields": "SUBAREA",
+        "limit": 2,
+    },
+    expect_codes=["results_truncated"],
+)
+check_structured(
+    "structured: get_layer_schema",
+    "get_layer_schema",
+    {"item_id": MHPA_ID, "keyword": "HAB"},
+)
+check_structured(
+    "structured: get_distinct_values",
+    "get_distinct_values",
+    {"item_id": MHPA_ID, "field": "INHABPRES"},
+)
+check_structured(
+    "structured: spatial_query_point by address",
+    "spatial_query_point",
+    {"item_id": ZONES_ID, "address": "202 C St", "out_fields": "ZONE_NAME"},
+    expect_codes=["geocoded"],
+)
+check_structured(
+    "structured: geocode_address", "geocode_address", {"address": "202 C St"}
+)
 
 print("\n=== SUMMARY ===")
 n_pass = sum(results)

@@ -1,6 +1,6 @@
 [project]
 name = "opencontext"
-version = "1.1.0"
+version = "1.2.0"
 description = "Extensible MCP framework template for civic data platforms"
 authors = [
     {name = "Srihari Raman", email = "srihari.raman@boston.gov"}
@@ -25,6 +25,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-xdist>=3.0.0",
     "ruff>=0.1.0",
+    "jsonschema>=4.0.0",
     "pip-audit>=2.0.0",
 ]
 

@@ -6,6 +6,8 @@
 # Testing
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
+# Validates tool output against each declared MCP outputSchema
+jsonschema>=4.0.0
 
 # Pinned to match .pre-commit-config.yaml and CI: ruff's formatter is not
 # stable across releases, so a floating version makes `format --check`

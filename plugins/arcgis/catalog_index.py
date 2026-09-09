@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.interfaces import ToolInputError
+
 logger = logging.getLogger(__name__)
 
 _WORD_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
@@ -203,7 +205,7 @@ class CatalogIndex:
     ) -> List[Dict[str, Any]]:
         """Facet counts of indexed layers by a catalog field."""
         if field not in AGGREGATABLE_FIELDS:
-            raise ValueError(
+            raise ToolInputError(
                 f"'{field}' is not an aggregatable field. "
                 f"Available fields: {', '.join(AGGREGATABLE_FIELDS)}."
             )

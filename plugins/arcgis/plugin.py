@@ -18,7 +18,7 @@ import html
 import logging
 import re
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import httpx
 
@@ -96,6 +96,386 @@ _TOOL_TITLES = {
     "geocode_address": "Geocode Address",
 }
 
+# Marker note on catalog entries fetched live (not in the bundled manifest).
+_LIVE_NOTE = "Not in the bundled catalog (fetched live)."
+
+# Stable caveat codes. A caller branches on these instead of parsing prose
+# that may be reworded. The schema enum below is generated from this tuple,
+# so an emitted code outside it is impossible without also changing the
+# contract.
+CAVEAT_CODES = (
+    "limit_clamped",
+    "results_truncated",
+    "page_cap_reached",
+    "pagination_unsupported",
+    "count_unavailable",
+    "live_metadata",
+    "geocoded",
+    "multiple_geocode_matches",
+    "no_results",
+)
+
+
+class _Caveats:
+    """Warnings for one tool response, rendered into BOTH output forms.
+
+    Every warning is added here exactly once. The prose lines and the
+    ``caveats`` array in structuredContent are both derived from this
+    list, which is what stops the human-readable text and the
+    machine-readable contract from drifting apart as either is edited.
+    """
+
+    def __init__(self) -> None:
+        self._items: List[Dict[str, str]] = []
+
+    def add(self, code: str, message: Optional[str]) -> None:
+        if code not in CAVEAT_CODES:  # pragma: no cover - programming error
+            raise RuntimeError(f"unknown caveat code {code!r}")
+        if message:
+            self._items.append({"code": code, "message": message})
+
+    @property
+    def messages(self) -> List[str]:
+        return [item["message"] for item in self._items]
+
+    def as_list(self) -> List[Dict[str, str]]:
+        return [dict(item) for item in self._items]
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+
+class _ToolOutput(NamedTuple):
+    """What a tool handler returns: prose for the model, data for code."""
+
+    text: str
+    structured: Dict[str, Any]
+
+
+# ── Output schemas ────────────────────────────────────────────────────
+#
+# A declared outputSchema is BINDING -- the spec says servers MUST return
+# conforming structured results. These are deliberately loose where the
+# real data is loose: rows carry whatever out_fields the caller asked
+# for (raw ArcGIS attributes, dates as epoch milliseconds), distinct
+# values can be strings, numbers or null, and TOTAL MATCHING is null when
+# the count query fails. A schema written from the happy path would make
+# the server violate its own contract on live data.
+#
+# Shared envelope across all eight tools: {query, summary, caveats} plus
+# ONE payload key named for what it carries (layers, layer, buckets, rows,
+# fields, values, candidates). A model that learns the shape once can
+# read any of them. Keep these identical across the GIS forks.
+
+_CAVEATS_SCHEMA: Dict[str, Any] = {
+    "type": "array",
+    "description": (
+        "Warnings about this result. Branch on `code` rather than parsing "
+        "the prose; every entry here also appears verbatim in the text "
+        "content."
+    ),
+    "items": {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "enum": list(CAVEAT_CODES)},
+            "message": {"type": "string"},
+        },
+        "required": ["code", "message"],
+        "additionalProperties": False,
+    },
+}
+
+_ROW_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "One record: RAW layer attributes keyed by physical field name. "
+        "Which fields are present depends on out_fields. Date-typed fields "
+        "are epoch milliseconds."
+    ),
+    "additionalProperties": True,
+}
+
+_NULLABLE_STR: Dict[str, Any] = {"type": ["string", "null"]}
+
+_LAYER_ENTRY_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "description": "One indexed layer from the services-directory catalog.",
+    "properties": {
+        "dataset_id": {
+            "type": "string",
+            "description": "Path id: {folder}/{service}/{MapServer|FeatureServer}/{layerId}",
+        },
+        "name": {"type": "string"},
+        "folder": {"type": "string", "description": "'' for the directory root."},
+        "service": {"type": "string"},
+        "service_type": {"type": "string", "enum": ["MapServer", "FeatureServer"]},
+        "layer_id": {"type": "integer"},
+        "geometry_type": {
+            "type": "string",
+            "description": "esriGeometryPolygon / Point / Polyline / '' for tables.",
+        },
+        "description": {"type": "string"},
+        "featured": {"type": "boolean"},
+    },
+    "required": ["dataset_id", "name", "service_type", "layer_id"],
+    "additionalProperties": True,
+}
+
+
+def _envelope_schema(
+    description: str,
+    query_props: Dict[str, Any],
+    summary_props: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build one tool's output schema around the shared envelope."""
+    properties: Dict[str, Any] = {
+        "query": {
+            "type": "object",
+            "description": "What was asked, as the server resolved it.",
+            "properties": query_props,
+            "additionalProperties": True,
+        },
+        "summary": {
+            "type": "object",
+            "description": "Counts and outcome flags for this result.",
+            "properties": summary_props,
+            "additionalProperties": True,
+        },
+        "caveats": _CAVEATS_SCHEMA,
+    }
+    properties.update(payload)
+    return {
+        "type": "object",
+        "description": description,
+        "properties": properties,
+        # Every declared key is required on every code path; extra keys
+        # stay legal so a later addition is not a contract violation.
+        "required": ["query", "summary", "caveats", *payload],
+        "additionalProperties": True,
+    }
+
+
+_OUTPUT_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "search_datasets": _envelope_schema(
+        "Catalog search results.",
+        {
+            "q": {"type": "string"},
+            "type": _NULLABLE_STR,
+            "limit": {"type": "integer"},
+        },
+        {
+            "returned": {"type": "integer"},
+            "catalog_layers": {
+                "type": "integer",
+                "description": "Total layers in the bundled catalog.",
+            },
+            "catalog_generated_at": {
+                **_NULLABLE_STR,
+                "description": "ISO timestamp of the catalog crawl.",
+            },
+        },
+        {"layers": {"type": "array", "items": _LAYER_ENTRY_SCHEMA}},
+    ),
+    "get_dataset": _envelope_schema(
+        "Metadata for one layer.",
+        {"dataset_id": {"type": "string"}},
+        {
+            "in_catalog": {
+                "type": "boolean",
+                "description": "False when metadata was fetched live.",
+            },
+            "geometry": {
+                "type": "string",
+                "description": "Friendly geometry name ('' for tables).",
+            },
+        },
+        {
+            "layer": {
+                "type": "object",
+                "properties": {
+                    **_LAYER_ENTRY_SCHEMA["properties"],
+                    "layer_url": {"type": "string"},
+                    "max_record_count": {"type": ["integer", "null"]},
+                    "supports_pagination": {"type": "boolean"},
+                    "extent": {
+                        "type": ["object", "null"],
+                        "description": "Native extent (wkid 2230, State Plane feet).",
+                    },
+                },
+                "required": [
+                    "dataset_id",
+                    "name",
+                    "service_type",
+                    "layer_id",
+                    "layer_url",
+                ],
+                "additionalProperties": True,
+            }
+        },
+    ),
+    "get_aggregations": _envelope_schema(
+        "Facet counts of indexed layers.",
+        {
+            "field": {"type": "string", "enum": list(AGGREGATABLE_FIELDS)},
+            "q": _NULLABLE_STR,
+        },
+        {
+            "bucket_count": {"type": "integer"},
+            "layers_counted": {"type": "integer"},
+        },
+        {
+            "buckets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "count": {"type": "integer"},
+                    },
+                    "required": ["key", "count"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+    ),
+    "query_data": _envelope_schema(
+        "Attribute query results.",
+        {
+            "dataset_id": {"type": "string"},
+            "where": {"type": "string"},
+            "out_fields": {"type": "string"},
+            "order_by": _NULLABLE_STR,
+            "limit": {"type": "integer"},
+        },
+        {
+            "returned": {"type": "integer"},
+            "total_matching": {
+                "type": ["integer", "null"],
+                "description": (
+                    "Server-side count of ALL records matching `where`. Null "
+                    "when the count query failed -- which is NOT zero."
+                ),
+            },
+            "truncated": {
+                "type": "boolean",
+                "description": "True when more records match than were returned.",
+            },
+            "pages_fetched": {"type": "integer"},
+            "server_page_size": {"type": ["integer", "null"]},
+        },
+        {"rows": {"type": "array", "items": _ROW_SCHEMA}},
+    ),
+    "get_layer_schema": _envelope_schema(
+        "Field list for one layer.",
+        {"item_id": {"type": "string"}, "keyword": _NULLABLE_STR},
+        {
+            "layer_name": {"type": "string"},
+            "geometry_type": {"type": "string"},
+            "layer_url": {"type": "string"},
+            "field_count": {"type": "integer"},
+            "filtered": {
+                "type": "boolean",
+                "description": "True when `keyword` narrowed the list.",
+            },
+        },
+        {
+            "fields": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "description": (
+                        "RAW ArcGIS field descriptor (name, type, alias, "
+                        "length, domain with codedValues, ...)."
+                    ),
+                    "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string"},
+                        "alias": {"type": "string"},
+                    },
+                    "required": ["name"],
+                    "additionalProperties": True,
+                },
+            }
+        },
+    ),
+    "get_distinct_values": _envelope_schema(
+        "Distinct values of one field.",
+        {
+            "item_id": {"type": "string"},
+            "field": {"type": "string"},
+            "like": _NULLABLE_STR,
+            "where": {"type": "string"},
+            "limit": {"type": "integer"},
+        },
+        {
+            "returned": {"type": "integer"},
+            "truncated": {
+                "type": "boolean",
+                "description": "True when the list hit `limit`; more may exist.",
+            },
+        },
+        {
+            "values": {
+                "type": "array",
+                "description": "Raw values in server order; may include null.",
+                "items": {},
+            }
+        },
+    ),
+    "spatial_query_point": _envelope_schema(
+        "Polygons containing a point.",
+        {
+            "item_id": {"type": "string"},
+            "lon": {"type": "number"},
+            "lat": {"type": "number"},
+            "address": _NULLABLE_STR,
+            "matched_address": {
+                **_NULLABLE_STR,
+                "description": "Geocoder's normalised address when `address` was used.",
+            },
+            "where": {"type": "string"},
+            "out_fields": {"type": "string"},
+            "limit": {"type": "integer"},
+        },
+        {
+            "returned": {"type": "integer"},
+            "geocoded": {"type": "boolean"},
+            "truncated": {
+                "type": "boolean",
+                "description": "True when the result hit `limit`.",
+            },
+        },
+        {"rows": {"type": "array", "items": _ROW_SCHEMA}},
+    ),
+    "geocode_address": _envelope_schema(
+        "Geocoder candidates.",
+        {
+            "address": {"type": "string"},
+            "geocoder_query": {
+                "type": "string",
+                "description": "The address as sent, with the region bias appended.",
+            },
+        },
+        {"returned": {"type": "integer"}},
+        {
+            "candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "matched_address": {"type": "string"},
+                        "lon": {"type": "number"},
+                        "lat": {"type": "number"},
+                    },
+                    "required": ["matched_address", "lon", "lat"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+    ),
+}
+
 
 class ArcGISPlugin(DataPlugin):
     """Plugin for a bare ArcGIS Server REST services directory.
@@ -118,6 +498,7 @@ class ArcGISPlugin(DataPlugin):
         # published after the last crawl) get their metadata fetched live
         # once and cached here for the life of the instance.
         self._live_meta_cache: Dict[str, Dict[str, Any]] = {}
+        self._catalog_generated_at: Optional[str] = None
 
     async def initialize(self) -> bool:
         try:
@@ -126,6 +507,7 @@ class ArcGISPlugin(DataPlugin):
             manifest = load_manifest(self.plugin_config.catalog_path)
             featured = [f.model_dump() for f in self.plugin_config.featured_datasets]
             self.index = CatalogIndex(manifest, featured=featured)
+            self._catalog_generated_at = manifest.get("generated_at")
 
             feature_headers = {"Accept": "application/json"}
             params = {}
@@ -168,6 +550,7 @@ class ArcGISPlugin(DataPlugin):
                 name="search_datasets",
                 title=_TOOL_TITLES["search_datasets"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["search_datasets"],
                 description=(
                     f"Search {city}'s GIS layer catalog (an indexed crawl of "
                     "the city's ArcGIS Server services directory). Matches "
@@ -208,6 +591,7 @@ class ArcGISPlugin(DataPlugin):
                 name="get_dataset",
                 title=_TOOL_TITLES["get_dataset"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["get_dataset"],
                 description=(
                     "Get metadata for a specific layer by dataset_id (a path "
                     f"like '{_EXAMPLE_ID}'): geometry type, description, "
@@ -231,6 +615,7 @@ class ArcGISPlugin(DataPlugin):
                 name="get_aggregations",
                 title=_TOOL_TITLES["get_aggregations"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["get_aggregations"],
                 description=(
                     "Get facet counts of the indexed layers by a catalog "
                     "field -- explore what the directory holds by 'folder', "
@@ -259,6 +644,7 @@ class ArcGISPlugin(DataPlugin):
                 name="query_data",
                 title=_TOOL_TITLES["query_data"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["query_data"],
                 description=(
                     "Query records from a layer by dataset_id. The output "
                     "leads with TOTAL MATCHING, the full count of records "
@@ -311,6 +697,7 @@ class ArcGISPlugin(DataPlugin):
                 name="get_layer_schema",
                 title=_TOOL_TITLES["get_layer_schema"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["get_layer_schema"],
                 description=(
                     "List a layer's fields (name, type, alias, coded values) "
                     "so you can write a correct query_data WHERE clause "
@@ -344,6 +731,7 @@ class ArcGISPlugin(DataPlugin):
                 name="get_distinct_values",
                 title=_TOOL_TITLES["get_distinct_values"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["get_distinct_values"],
                 description=(
                     "List the distinct values in one field of a layer -- to "
                     "confirm the exact spelling/format of codes before "
@@ -393,6 +781,7 @@ class ArcGISPlugin(DataPlugin):
                 name="spatial_query_point",
                 title=_TOOL_TITLES["spatial_query_point"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["spatial_query_point"],
                 description=(
                     "Point-in-polygon lookup: return the attributes of every "
                     "polygon in a layer that contains a point -- 'which zone / "
@@ -461,6 +850,7 @@ class ArcGISPlugin(DataPlugin):
                 name="geocode_address",
                 title=_TOOL_TITLES["geocode_address"],
                 annotations=_READ_ONLY_TOOL,
+                output_schema=_OUTPUT_SCHEMAS["geocode_address"],
                 description=(
                     "Convert a street address to coordinates (lon/lat, WGS84) via "
                     "the US Census geocoder. Use the result with "
@@ -511,210 +901,69 @@ class ArcGISPlugin(DataPlugin):
         except (TypeError, ValueError):
             raise ToolInputError(f"{name} must be a number (got {raw!r})") from None
 
+    @staticmethod
+    def _require_str(arguments: Dict[str, Any], name: str) -> str:
+        value = arguments.get(name)
+        if not value or not isinstance(value, str):
+            raise ToolInputError(f"{name} is required")
+        return value
+
+    @staticmethod
+    def _clamp_limit(limit: int, ceiling: int, caveats: "_Caveats") -> int:
+        """Enforce a tool's server-side ceiling, recording it as a caveat
+        rather than silently returning fewer rows than asked for."""
+        if limit < 1:
+            raise ToolInputError(f"limit must be at least 1 (got {limit})")
+        if limit > ceiling:
+            caveats.add(
+                "limit_clamped",
+                f"limit {limit} was clamped to this tool's maximum of {ceiling}.",
+            )
+            return ceiling
+        return limit
+
+    @staticmethod
+    def _envelope(
+        query: Dict[str, Any],
+        summary: Dict[str, Any],
+        caveats: "_Caveats",
+        **payload: Any,
+    ) -> Dict[str, Any]:
+        """Assemble the {query, summary, caveats, <payload>} envelope."""
+        envelope: Dict[str, Any] = {
+            "query": query,
+            "summary": summary,
+            "caveats": caveats.as_list(),
+        }
+        envelope.update(payload)
+        return envelope
+
+    @staticmethod
+    def _with_caveats(text: str, caveats: "_Caveats") -> str:
+        """Render every caveat into the prose, on EVERY return path, so
+        anything in structured `caveats` is also visible to a model that
+        only reads the text."""
+        if not len(caveats):
+            return text
+        return text.rstrip("\n") + "\n\n" + "\n".join(caveats.messages)
+
     async def execute_tool(
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> ToolResult:
+        handler = getattr(self, f"_tool_{tool_name}", None)
+        if tool_name not in _TOOL_TITLES or handler is None:
+            return ToolResult(
+                content=[],
+                success=False,
+                error_message=f"Unknown tool: {tool_name}",
+            )
         try:
-            if tool_name == "search_datasets":
-                q = arguments.get("q", "")
-                limit = self._int_arg(arguments, "limit", 10)
-                item_type = arguments.get("type")
-                datasets = await self.search_datasets(q, limit, item_type)
-                return ToolResult(
-                    content=[
-                        {"type": "text", "text": self._format_search_results(datasets)}
-                    ],
-                    success=True,
-                )
-
-            elif tool_name == "get_dataset":
-                dataset_id = arguments.get("dataset_id")
-                if not dataset_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="dataset_id is required",
-                    )
-                dataset = await self.get_dataset(dataset_id)
-                return ToolResult(
-                    content=[{"type": "text", "text": self._format_dataset(dataset)}],
-                    success=True,
-                )
-
-            elif tool_name == "get_aggregations":
-                field = arguments.get("field")
-                if not field:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="field is required",
-                    )
-                q = arguments.get("q")
-                buckets = await self.get_aggregations(field, q)
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_aggregations(field, buckets),
-                        }
-                    ],
-                    success=True,
-                )
-
-            elif tool_name == "query_data":
-                dataset_id = arguments.get("dataset_id")
-                if not dataset_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="dataset_id is required",
-                    )
-                where = arguments.get("where", "1=1")
-                out_fields = arguments.get("out_fields", "*")
-                limit = self._int_arg(arguments, "limit", 100)
-                filters = {"where": where, "out_fields": out_fields}
-                if arguments.get("order_by"):
-                    filters["order_by"] = arguments["order_by"]
-                records = await self.query_data(dataset_id, filters, limit)
-                # Total match count is best-effort: a count failure must not
-                # hide the records we already fetched.
-                try:
-                    total = await self.get_record_count(dataset_id, where)
-                except Exception as count_err:
-                    logger.warning(f"Could not get record count: {count_err}")
-                    total = None
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_query_results(
-                                records, limit, total=total
-                            ),
-                        }
-                    ],
-                    success=True,
-                )
-
-            elif tool_name == "get_layer_schema":
-                item_id = arguments.get("item_id")
-                if not item_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="item_id is required",
-                    )
-                schema = await self.get_layer_schema(item_id, arguments.get("keyword"))
-                return ToolResult(
-                    content=[
-                        {"type": "text", "text": self._format_layer_schema(schema)}
-                    ],
-                    success=True,
-                )
-
-            elif tool_name == "get_distinct_values":
-                item_id = arguments.get("item_id")
-                field = arguments.get("field")
-                if not item_id or not field:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="item_id and field are required",
-                    )
-                values = await self.get_distinct_values(
-                    item_id,
-                    field,
-                    arguments.get("like"),
-                    arguments.get("where", "1=1"),
-                    self._int_arg(arguments, "limit", 200),
-                )
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_distinct_values(field, values),
-                        }
-                    ],
-                    success=True,
-                )
-
-            elif tool_name == "spatial_query_point":
-                item_id = arguments.get("item_id")
-                lon = self._float_arg(arguments, "lon")
-                lat = self._float_arg(arguments, "lat")
-                address = arguments.get("address")
-                if not item_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="item_id is required",
-                    )
-                geocoded_note = ""
-                if (lon is None or lat is None) and address:
-                    candidates = await self.geocode_address(address)
-                    if not candidates:
-                        return ToolResult(
-                            content=[],
-                            success=False,
-                            error_message=f"Could not geocode address: {address}",
-                        )
-                    lon = candidates[0]["lon"]
-                    lat = candidates[0]["lat"]
-                    geocoded_note = (
-                        f"Geocoded '{address}' -> {candidates[0]['matched_address']} "
-                        f"({lat}, {lon})\n\n"
-                    )
-                if lon is None or lat is None:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="Provide either `address` or both `lon` and `lat`.",
-                    )
-                limit = self._int_arg(arguments, "limit", 10)
-                records = await self.spatial_query_point(
-                    item_id,
-                    lon,
-                    lat,
-                    arguments.get("where", "1=1"),
-                    arguments.get("out_fields", "*"),
-                    limit,
-                )
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": geocoded_note
-                            + self._format_query_results(records, limit),
-                        }
-                    ],
-                    success=True,
-                )
-
-            elif tool_name == "geocode_address":
-                address = arguments.get("address")
-                if not address:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="address is required",
-                    )
-                candidates = await self.geocode_address(address)
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_geocode(address, candidates),
-                        }
-                    ],
-                    success=True,
-                )
-
-            else:
-                return ToolResult(
-                    content=[],
-                    success=False,
-                    error_message=f"Unknown tool: {tool_name}",
-                )
-
+            output: _ToolOutput = await handler(arguments)
+            return ToolResult(
+                content=[{"type": "text", "text": output.text}],
+                structured_content=output.structured,
+                success=True,
+            )
         except ToolInputError as e:
             # The caller passed something invalid. WARNING, no traceback:
             # a stack trace here is noise that buries real faults, and the
@@ -734,6 +983,328 @@ class ArcGISPlugin(DataPlugin):
                 success=False,
                 error_message=str(e) if str(e) else "Tool execution failed",
             )
+
+    # ── Tool handlers: each returns prose + structured content ──────────
+
+    async def _tool_search_datasets(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        q = a.get("q") or ""
+        item_type = a.get("type") or None
+        limit = self._clamp_limit(self._int_arg(a, "limit", 10), 100, caveats)
+        datasets = await self.search_datasets(q, limit, item_type)
+        if not datasets:
+            caveats.add(
+                "no_results",
+                "No layers found. Try a broader keyword, or explore with "
+                "get_aggregations (field='folder' or 'service').",
+            )
+        layers = [
+            {
+                "dataset_id": d.get("dataset_id", ""),
+                "name": d.get("name", ""),
+                "folder": d.get("folder", "") or "",
+                "service": d.get("service", "") or "",
+                "service_type": d.get("service_type", ""),
+                "layer_id": int(d.get("layer_id", 0)),
+                "geometry_type": d.get("geometry_type", "") or "",
+                "description": self._describe_entry(d),
+                "featured": bool(d.get("featured")),
+            }
+            for d in datasets
+        ]
+        structured = self._envelope(
+            {"q": q, "type": item_type, "limit": limit},
+            {
+                "returned": len(layers),
+                "catalog_layers": len(self.index.entries) if self.index else 0,
+                "catalog_generated_at": self._catalog_generated_at,
+            },
+            caveats,
+            layers=layers,
+        )
+        text = self._with_caveats(self._format_search_results(datasets), caveats)
+        return _ToolOutput(text, structured)
+
+    async def _tool_get_dataset(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        dataset_id = self._validate_dataset_id(self._require_str(a, "dataset_id"))
+        dataset = await self.get_dataset(dataset_id)
+        in_catalog = dataset.get("note") != _LIVE_NOTE
+        if not in_catalog:
+            caveats.add("live_metadata", _LIVE_NOTE)
+        layer = dict(dataset)
+        layer["layer_id"] = int(layer.get("layer_id", 0))
+        layer["supports_pagination"] = bool(layer.get("supports_pagination"))
+        layer["featured"] = bool(layer.get("featured"))
+        structured = self._envelope(
+            {"dataset_id": dataset_id},
+            {
+                "in_catalog": in_catalog,
+                "geometry": friendly_geometry(dataset.get("geometry_type", "")),
+            },
+            caveats,
+            layer=layer,
+        )
+        text = self._with_caveats(self._format_dataset(dataset), caveats)
+        return _ToolOutput(text, structured)
+
+    async def _tool_get_aggregations(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        field = self._require_str(a, "field")
+        q = a.get("q") or None
+        buckets = await self.get_aggregations(field, q)
+        if not buckets:
+            caveats.add(
+                "no_results",
+                f"No aggregation results for '{field}'"
+                + (f" with query '{q}'" if q else "")
+                + ".",
+            )
+        out = [
+            {"key": str(b.get("key", "")), "count": int(b.get("doc_count", 0))}
+            for b in buckets
+        ]
+        structured = self._envelope(
+            {"field": field, "q": q},
+            {"bucket_count": len(out), "layers_counted": sum(b["count"] for b in out)},
+            caveats,
+            buckets=out,
+        )
+        text = self._with_caveats(self._format_aggregations(field, buckets), caveats)
+        return _ToolOutput(text, structured)
+
+    async def _tool_query_data(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        dataset_id = self._validate_dataset_id(self._require_str(a, "dataset_id"))
+        where = a.get("where") or "1=1"
+        out_fields = a.get("out_fields") or "*"
+        order_by = a.get("order_by") or None
+        limit = self._clamp_limit(self._int_arg(a, "limit", 100), 1000, caveats)
+        filters: Dict[str, Any] = {"where": where, "out_fields": out_fields}
+        if order_by:
+            filters["order_by"] = order_by
+        records, meta = await self._fetch_records(dataset_id, filters, limit)
+        # Total match count is best-effort: a count failure must not hide
+        # the records we already fetched.
+        try:
+            total: Optional[int] = await self.get_record_count(dataset_id, where)
+        except Exception as count_err:
+            logger.warning(f"Could not get record count: {count_err}")
+            total = None
+            caveats.add(
+                "count_unavailable",
+                "TOTAL MATCHING is unavailable: the count query failed, so "
+                "the total is unknown (not zero).",
+            )
+        if meta["live_metadata"]:
+            caveats.add("live_metadata", _LIVE_NOTE)
+        truncated = (total is not None and total > len(records)) or (
+            total is None and meta["exceeded_transfer_limit"]
+        )
+        if truncated:
+            caveats.add(
+                "results_truncated",
+                f"Only the first {len(records)} matching record(s) are shown"
+                + (f" of {total}" if total is not None else "")
+                + f" (limit {limit}); raise limit or narrow `where`.",
+            )
+        if meta["page_cap_reached"]:
+            caveats.add(
+                "page_cap_reached",
+                f"Stopped after {meta['pages']} server pages; narrow `where` "
+                "or lower limit to see everything.",
+            )
+        if meta["pagination_unsupported"]:
+            caveats.add(
+                "pagination_unsupported",
+                "This layer does not support paging; only the first server "
+                f"page ({meta['server_page_size']} records max) is available.",
+            )
+        if not records:
+            caveats.add(
+                "no_results",
+                "No records matched. Check field names with get_layer_schema "
+                "and exact values with get_distinct_values.",
+            )
+        structured = self._envelope(
+            {
+                "dataset_id": dataset_id,
+                "where": where,
+                "out_fields": out_fields,
+                "order_by": order_by,
+                "limit": limit,
+            },
+            {
+                "returned": len(records),
+                "total_matching": total,
+                "truncated": bool(truncated),
+                "pages_fetched": meta["pages"],
+                "server_page_size": meta["server_page_size"],
+            },
+            caveats,
+            rows=records,
+        )
+        text = self._with_caveats(
+            self._format_query_results(records, limit, total=total), caveats
+        )
+        return _ToolOutput(text, structured)
+
+    async def _tool_get_layer_schema(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        item_id = self._validate_dataset_id(self._require_str(a, "item_id"))
+        keyword = a.get("keyword") or None
+        schema = await self.get_layer_schema(item_id, keyword)
+        fields = schema.get("fields", []) or []
+        if not fields:
+            caveats.add(
+                "no_results",
+                "No fields found for this layer"
+                + (f" matching '{keyword}'" if keyword else "")
+                + ".",
+            )
+        structured = self._envelope(
+            {"item_id": item_id, "keyword": keyword},
+            {
+                "layer_name": schema.get("layer_name", "") or "",
+                "geometry_type": schema.get("geometry_type", "") or "",
+                "layer_url": schema.get("layer_url", ""),
+                "field_count": len(fields),
+                "filtered": bool(keyword),
+            },
+            caveats,
+            fields=[f for f in fields if isinstance(f, dict) and f.get("name")],
+        )
+        text = self._with_caveats(self._format_layer_schema(schema), caveats)
+        return _ToolOutput(text, structured)
+
+    async def _tool_get_distinct_values(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        item_id = self._validate_dataset_id(self._require_str(a, "item_id"))
+        field = self._require_str(a, "field")
+        like = a.get("like") or None
+        where = a.get("where") or "1=1"
+        limit = self._clamp_limit(self._int_arg(a, "limit", 200), 1000, caveats)
+        values = await self.get_distinct_values(item_id, field, like, where, limit)
+        truncated = len(values) >= limit
+        if truncated:
+            caveats.add(
+                "results_truncated",
+                f"Distinct values were capped at {limit}; more may exist. Pass "
+                "a `like` filter or raise limit.",
+            )
+        if not values:
+            caveats.add("no_results", f"No distinct values found for '{field}'.")
+        structured = self._envelope(
+            {
+                "item_id": item_id,
+                "field": field,
+                "like": like,
+                "where": where,
+                "limit": limit,
+            },
+            {"returned": len(values), "truncated": truncated},
+            caveats,
+            values=list(values),
+        )
+        text = self._with_caveats(self._format_distinct_values(field, values), caveats)
+        return _ToolOutput(text, structured)
+
+    async def _tool_spatial_query_point(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        item_id = self._validate_dataset_id(self._require_str(a, "item_id"))
+        lon = self._float_arg(a, "lon")
+        lat = self._float_arg(a, "lat")
+        address = a.get("address") or None
+        matched_address: Optional[str] = None
+        if (lon is None or lat is None) and address:
+            candidates = await self.geocode_address(address)
+            if not candidates:
+                raise ToolInputError(
+                    f"Could not geocode address: {address}. Try including the "
+                    f"city and state, e.g. '{address}, San Diego, CA'."
+                )
+            lon = candidates[0]["lon"]
+            lat = candidates[0]["lat"]
+            matched_address = candidates[0]["matched_address"]
+            caveats.add(
+                "geocoded",
+                f"Geocoded '{address}' -> {matched_address} ({lat}, {lon})",
+            )
+            if len(candidates) > 1:
+                caveats.add(
+                    "multiple_geocode_matches",
+                    f"{len(candidates)} geocode matches for '{address}'; the "
+                    "first was used. Call geocode_address to see them all.",
+                )
+        if lon is None or lat is None:
+            raise ToolInputError("Provide either `address` or both `lon` and `lat`.")
+        where = a.get("where") or "1=1"
+        out_fields = a.get("out_fields") or "*"
+        limit = self._clamp_limit(self._int_arg(a, "limit", 10), 50, caveats)
+        records = await self.spatial_query_point(
+            item_id, lon, lat, where, out_fields, limit
+        )
+        truncated = len(records) >= limit
+        if truncated:
+            caveats.add(
+                "results_truncated",
+                f"Result hit the limit of {limit}; more polygons may contain "
+                "this point.",
+            )
+        if not records:
+            caveats.add(
+                "no_results",
+                "No polygon in this layer contains the point. Check that "
+                "item_id is a polygon layer (get_dataset) and that lon/lat are "
+                "WGS84 with lon first.",
+            )
+        structured = self._envelope(
+            {
+                "item_id": item_id,
+                "lon": lon,
+                "lat": lat,
+                "address": address,
+                "matched_address": matched_address,
+                "where": where,
+                "out_fields": out_fields,
+                "limit": limit,
+            },
+            {
+                "returned": len(records),
+                "geocoded": matched_address is not None,
+                "truncated": truncated,
+            },
+            caveats,
+            rows=records,
+        )
+        text = self._with_caveats(self._format_query_results(records, limit), caveats)
+        return _ToolOutput(text, structured)
+
+    async def _tool_geocode_address(self, a: Dict[str, Any]) -> _ToolOutput:
+        caveats = _Caveats()
+        address = self._require_str(a, "address")
+        candidates = await self.geocode_address(address)
+        if not candidates:
+            caveats.add(
+                "no_results",
+                f"No geocode match for '{address}'. Try including the city and "
+                f"state, e.g. '{address}, San Diego, CA'.",
+            )
+        structured = self._envelope(
+            {"address": address, "geocoder_query": self._geocoder_query(address)},
+            {"returned": len(candidates)},
+            caveats,
+            candidates=[
+                {
+                    "matched_address": str(c.get("matched_address", "")),
+                    "lon": float(c["lon"]),
+                    "lat": float(c["lat"]),
+                }
+                for c in candidates
+            ],
+        )
+        text = self._with_caveats(self._format_geocode(address, candidates), caveats)
+        return _ToolOutput(text, structured)
 
     # ── Dataset id / URL resolution ──────────────────────────────────────
 
@@ -819,7 +1390,7 @@ class ArcGISPlugin(DataPlugin):
                 (meta.get("advancedQueryCapabilities") or {}).get("supportsPagination")
             ),
             "extent": None,
-            "note": "Not in the bundled catalog (fetched live).",
+            "note": _LIVE_NOTE,
         }
         self._live_meta_cache[dataset_id] = entry
         return entry
@@ -843,9 +1414,30 @@ class ArcGISPlugin(DataPlugin):
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
+        records, _ = await self._fetch_records(resource_id, filters, limit)
+        return records
+
+    async def _fetch_records(
+        self,
+        resource_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """query_data plus the paging facts the structured output reports:
+        pages fetched, the layer's server page size, whether the page cap
+        or a non-paging layer stopped us, and whether the server flagged
+        exceededTransferLimit on the last page."""
         if limit < 1:
             raise ToolInputError(f"limit must be at least 1 (got {limit})")
         layer_url = self._layer_url_for_item(resource_id)
+        meta: Dict[str, Any] = {
+            "pages": 0,
+            "server_page_size": None,
+            "page_cap_reached": False,
+            "pagination_unsupported": False,
+            "exceeded_transfer_limit": False,
+            "live_metadata": False,
+        }
 
         where_clause = filters.get("where", "1=1") if filters else "1=1"
         where_clause = WhereValidator.validate(where_clause)
@@ -864,14 +1456,17 @@ class ArcGISPlugin(DataPlugin):
             entry = await self._entry_for(resource_id)
             max_record_count = entry.get("max_record_count") or max_record_count
             supports_pagination = entry.get("supports_pagination", True)
+            meta["live_metadata"] = entry.get("note") == _LIVE_NOTE
         except Exception as meta_err:
             logger.warning(
                 f"No catalog/live metadata for {resource_id}; using default "
                 f"page size {max_record_count}: {meta_err}"
             )
 
+        meta["server_page_size"] = max_record_count
         records: List[Dict[str, Any]] = []
         offset = 0
+        stopped = False
         for _ in range(_MAX_QUERY_PAGES):
             want = min(max_record_count, limit - len(records))
             params = {
@@ -889,20 +1484,27 @@ class ArcGISPlugin(DataPlugin):
                 params["resultOffset"] = offset
 
             data = await self._query_layer(layer_url, params)
+            meta["pages"] += 1
+            meta["exceeded_transfer_limit"] = bool(data.get("exceededTransferLimit"))
             features = data.get("features", [])
             records.extend(f.get("attributes", {}) for f in features)
 
             if len(records) >= limit or len(features) < want:
+                stopped = True
                 break
             if not supports_pagination:
                 logger.warning(
                     f"Layer {resource_id} does not support pagination; "
                     f"returning first {len(records)} records"
                 )
+                meta["pagination_unsupported"] = True
+                stopped = True
                 break
             offset += len(features)
+        if not stopped:
+            meta["page_cap_reached"] = True
 
-        return records[:limit]
+        return records[:limit], meta
 
     # ── Aggregations (catalog facets, not a DataPlugin method) ──────────
 
@@ -1077,12 +1679,7 @@ class ArcGISPlugin(DataPlugin):
         """
         if not address or not address.strip():
             raise ToolInputError("address is required")
-        region = (
-            self.plugin_config.geocoder_region if self.plugin_config else ""
-        ) or ""
-        full = address
-        if region and region.lower() not in address.lower():
-            full = f"{address}, {region}"
+        full = self._geocoder_query(address)
 
         params = {
             "address": full,
@@ -1112,6 +1709,16 @@ class ArcGISPlugin(DataPlugin):
                     }
                 )
         return results
+
+    def _geocoder_query(self, address: str) -> str:
+        """The address as sent to the geocoder: region bias appended unless
+        the caller already included it."""
+        region = (
+            self.plugin_config.geocoder_region if self.plugin_config else ""
+        ) or ""
+        if region and region.lower() not in address.lower():
+            return f"{address}, {region}"
+        return address
 
     # ── Health check ────────────────────────────────────────────────────
 
@@ -1156,10 +1763,7 @@ class ArcGISPlugin(DataPlugin):
 
     def _format_search_results(self, datasets: List[Dict[str, Any]]) -> str:
         if not datasets:
-            return (
-                "No layers found. Try a broader keyword, or explore with "
-                "get_aggregations (field='folder' or 'service')."
-            )
+            return "Found 0 layer(s)."
 
         lines = [f"Found {len(datasets)} layer(s):\n"]
         for i, ds in enumerate(datasets, 1):
@@ -1211,8 +1815,10 @@ class ArcGISPlugin(DataPlugin):
     ) -> str:
         if not records:
             if total is not None:
-                return f"TOTAL MATCHING: {total}\nNo records on this page."
-            return "No records returned."
+                return (
+                    f"TOTAL MATCHING: {total}\nReturned 0 record(s) (limit: {limit})."
+                )
+            return f"Returned 0 record(s) (limit: {limit})."
 
         lines = []
         if total is not None:
@@ -1231,10 +1837,7 @@ class ArcGISPlugin(DataPlugin):
 
     def _format_aggregations(self, field: str, buckets: List[Dict[str, Any]]) -> str:
         if not buckets:
-            return (
-                f"No aggregation results for '{field}'. Available fields: "
-                f"{', '.join(AGGREGATABLE_FIELDS)}."
-            )
+            return f"Aggregations for '{field}': 0 bucket(s)."
 
         lines = [f"Aggregations for '{field}':\n"]
         for bucket in buckets:
@@ -1247,7 +1850,7 @@ class ArcGISPlugin(DataPlugin):
     def _format_layer_schema(self, schema: Dict[str, Any]) -> str:
         fields = schema.get("fields", [])
         if not fields:
-            return "No fields found for this layer (or none matched the keyword)."
+            return f"Layer: {schema.get('layer_name', '')}\nFields (0)."
 
         lines = [
             f"Layer: {schema.get('layer_name', '')}",
@@ -1275,7 +1878,7 @@ class ArcGISPlugin(DataPlugin):
 
     def _format_distinct_values(self, field: str, values: List[Any]) -> str:
         if not values:
-            return f"No distinct values found for '{field}'."
+            return f"0 distinct value(s) for '{field}'."
 
         lines = [f"{len(values)} distinct value(s) for '{field}':", ""]
         for v in values:
@@ -1284,10 +1887,7 @@ class ArcGISPlugin(DataPlugin):
 
     def _format_geocode(self, address: str, candidates: List[Dict[str, Any]]) -> str:
         if not candidates:
-            return (
-                f"No geocode match for '{address}'. Try including the city and "
-                f"state, e.g. '{address}, San Diego, CA'."
-            )
+            return f"0 match(es) for '{address}'."
         lines = [f"{len(candidates)} match(es) for '{address}':", ""]
         for c in candidates:
             lines.append(f"  {c.get('matched_address', '')}")
