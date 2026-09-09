@@ -39,7 +39,12 @@ plugins:
     enabled: true
     services_url: "https://webmaps.sandiego.gov/arcgis/rest/services"
     city_name: "City of San Diego"
-    timeout: 120
+    # HTTP timeout to ArcGIS Server, per request. The ladder is API Gateway
+    # 29s (hard, non-adjustable) > Lambda 28s (aws.lambda_timeout below) >
+    # this. A hung upstream then surfaces as a readable tool error instead
+    # of the Lambda being killed mid-flight. 60 days of prod traffic showed
+    # a max invocation of 1.8s, so 20s clears every observed request.
+    timeout: 20
     geocoder_region: "San Diego, CA" # biases address geocoding to San Diego
     catalog_path: "plugins/arcgis/catalog.json"
     # token: "${ARCGIS_TOKEN}"  # Optional: token for non-anonymous services
@@ -70,7 +75,10 @@ aws:
   region: "us-west-2" # AWS region for Lambda
   lambda_name: "sandiego-city-gis-mcp" # Lambda function name
   lambda_memory: 512 # Lambda memory in MB (128-10240)
-  lambda_timeout: 120 # Lambda timeout in seconds (max 900)
+  # 28s: just under REST API Gateway's hard 29s integration timeout. Anything
+  # longer only burns billed compute and a reserved-concurrency slot after
+  # the client already has its 504. This value WINS over prod.tfvars.
+  lambda_timeout: 28
 
 # Logging configuration
 logging:

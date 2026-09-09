@@ -2,10 +2,16 @@ lambda_name = "sandiego-city-gis-mcp-prod"
 stage_name  = "prod"
 aws_region  = "us-west-2"
 config_file = "config.yaml"
+# NOTE: lambda_memory and lambda_timeout here are OVERRIDDEN by the aws:
+# block in config.yaml (see terraform/aws/main.tf locals) -- they are kept
+# in sync so this file is not misleading, but config.yaml is the file to
+# edit. lambda_name works the OPPOSITE way: this file wins.
+#
 # 512 MB is plenty: discovery is a static in-memory catalog (~700 layers)
 # and queries stream through to ArcGIS; no polygon math happens in-process.
-lambda_memory   = 512
-lambda_timeout  = 120
+# 28 s sits just under API Gateway's hard, non-adjustable 29 s ceiling.
+lambda_memory  = 512
+lambda_timeout = 28
 api_quota_limit = 3000
 api_rate_limit  = 5
 api_burst_limit = 10
