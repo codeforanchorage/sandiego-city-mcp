@@ -1,11 +1,16 @@
 """Production smoke test for the San Diego City GIS MCP server.
 
 Exercises the JSON-RPC surface and the core arcgis tool chain end-to-end
-against the deployed Lambda, finishing with the "verification query": a
-WGS84 point-in-polygon on the Multi-Habitat Planning Area (MHPA) at the
-Tijuana River Valley, which must return the containing preserve polygon
-with HABPRES. Read-only; paces calls to stay under the API Gateway rate
-limit (5 rps) and WAF per-IP cap (300/5min).
+against the deployed Lambda, including the "verification query": a WGS84
+point-in-polygon on the Multi-Habitat Planning Area (MHPA) at the Tijuana
+River Valley, which must return the containing preserve polygon with
+HABPRES. It then asserts the MCP conformance surface: protocol version
+negotiation, spec error codes for caller mistakes (-32601/-32602), the
+Origin allowlist (403), the MCP-Protocol-Version header check (400, and
+deliberately NOT -32022), CORS preflight headers, and that a bad tool
+argument comes back as a readable tool error. Read-only; paces calls to
+stay under the API Gateway rate limit (5 rps) and WAF per-IP cap
+(300/5min).
 
 Usage:
     python3 scripts/smoke_prod.py [URL]
@@ -19,6 +24,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 URL = (
@@ -50,6 +56,41 @@ def rpc(method, params=None):
         body = json.loads(r.read().decode())
     time.sleep(0.4)  # pace under 5 rps
     return body
+
+
+def raw(method="POST", payload=None, headers=None):
+    """Low-level request that returns (status, headers, body) and never
+    raises on 4xx/5xx -- the conformance checks assert on those."""
+    data = json.dumps(payload).encode() if payload is not None else None
+    hdrs = {"Accept": "application/json"}
+    if data is not None:
+        hdrs["Content-Type"] = "application/json"
+    hdrs.update(headers or {})
+    req = urllib.request.Request(URL, data=data, headers=hdrs, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            status, resp_headers, body = r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        status, resp_headers, body = e.code, dict(e.headers), e.read()
+    time.sleep(0.4)  # pace under 5 rps
+    try:
+        parsed = json.loads(body.decode()) if body else None
+    except ValueError:
+        parsed = body.decode(errors="replace")
+    return status, {k.lower(): v for k, v in resp_headers.items()}, parsed
+
+
+def jsonrpc(method, params=None, id_=None):
+    global _id
+    _id += 1
+    payload = {
+        "jsonrpc": "2.0",
+        "id": id_ if id_ is not None else _id,
+        "method": method,
+    }
+    if params is not None:
+        payload["params"] = params
+    return payload
 
 
 def call_tool(name, args):
@@ -252,6 +293,152 @@ try:
     check("get_aggregations(folder)", "Planning" in t, t.replace("\n", " ")[:60])
 except Exception as e:
     check("get_aggregations(folder)", False, repr(e))
+
+# ── MCP conformance surface ────────────────────────────────────────────
+# These mirror the checks the sibling forks run after every deploy. Each
+# one caught a real regression somewhere in the fleet at least once.
+
+# 14. protocol version negotiation -- a supported requested version is
+#     echoed; an unknown one falls back to the newest supported.
+try:
+    r = rpc(
+        "initialize",
+        {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "smoke", "version": "0"},
+        },
+    )
+    echoed = r["result"]["protocolVersion"] == "2025-06-18"
+    r2 = rpc(
+        "initialize",
+        {
+            "protocolVersion": "1999-01-01",
+            "capabilities": {},
+            "clientInfo": {"name": "smoke", "version": "0"},
+        },
+    )
+    fallback = r2["result"]["protocolVersion"]
+    info = r2["result"]["serverInfo"]
+    ok = echoed and fallback >= "2025-11-25" and info["name"] != "opencontext"
+    check(
+        "initialize negotiates protocolVersion",
+        ok,
+        f"echo={echoed} fallback={fallback} serverInfo={info}",
+    )
+except Exception as e:
+    check("initialize negotiates protocolVersion", False, repr(e))
+
+# 15. unknown method -> -32601 Method not found (not -32603 Internal error)
+try:
+    r = rpc("resources/list")
+    err = r.get("error", {})
+    check("unknown method -> -32601", err.get("code") == -32601, str(err)[:70])
+except Exception as e:
+    check("unknown method -> -32601", False, repr(e))
+
+# 16. unknown tool -> -32602 with the available tool list in data
+try:
+    r = rpc("tools/call", {"name": "arcgis__nope", "arguments": {}})
+    err = r.get("error", {})
+    ok = (
+        err.get("code") == -32602
+        and err.get("message", "").startswith("Unknown tool")
+        and "arcgis__query_data" in (err.get("data") or {}).get("available_tools", [])
+    )
+    check("unknown tool -> -32602 + available_tools", ok, str(err)[:70])
+except Exception as e:
+    check("unknown tool -> -32602 + available_tools", False, repr(e))
+
+# 17. non-object arguments -> -32602, never a raw Python error
+try:
+    r = rpc("tools/call", {"name": "arcgis__get_dataset", "arguments": "x"})
+    err = r.get("error", {})
+    check("non-object arguments -> -32602", err.get("code") == -32602, str(err)[:70])
+except Exception as e:
+    check("non-object arguments -> -32602", False, repr(e))
+
+# 18. bad tool argument -> readable tool error (isError), no traceback path
+try:
+    r = call_tool("query_data", {"dataset_id": MHPA_ID, "limit": "many"})
+    res = r.get("result", {})
+    ok = res.get("isError") is True and "limit must be an integer" in text_of(r)
+    check("bad tool argument -> isError with message", ok, text_of(r)[:60])
+except Exception as e:
+    check("bad tool argument -> isError with message", False, repr(e))
+
+# 19. disallowed Origin -> 403 before routing (DNS-rebinding defence)
+try:
+    status, _, body = raw(
+        payload=jsonrpc("ping"), headers={"Origin": "https://evil.example"}
+    )
+    ok = status == 403 and (body or {}).get("error", {}).get("code") == -32600
+    check("disallowed Origin -> 403", ok, f"HTTP {status} {str(body)[:50]}")
+except Exception as e:
+    check("disallowed Origin -> 403", False, repr(e))
+
+# 20. allowlisted Origin -> 200 with the origin reflected
+try:
+    status, hdrs, _ = raw(
+        payload=jsonrpc("ping"), headers={"Origin": "https://claude.ai"}
+    )
+    ok = (
+        status == 200 and hdrs.get("access-control-allow-origin") == "https://claude.ai"
+    )
+    check("allowlisted Origin -> 200 + reflected", ok, f"HTTP {status}")
+except Exception as e:
+    check("allowlisted Origin -> 200 + reflected", False, repr(e))
+
+# 21. unsupported MCP-Protocol-Version -> 400 / -32600 with the supported
+#     list, and deliberately NOT -32022 (a dual-era client reads a plain
+#     4xx as "legacy server" and falls back to initialize, which we want).
+try:
+    status, _, body = raw(
+        payload=jsonrpc("ping"), headers={"MCP-Protocol-Version": "1999-01-01"}
+    )
+    err = (body or {}).get("error", {})
+    ok = (
+        status == 400
+        and err.get("code") == -32600
+        and "2025-11-25" in (err.get("data") or {}).get("supported", [])
+    )
+    check(
+        "bad MCP-Protocol-Version -> 400/-32600", ok, f"HTTP {status} {str(err)[:50]}"
+    )
+except Exception as e:
+    check("bad MCP-Protocol-Version -> 400/-32600", False, repr(e))
+
+# 22. supported MCP-Protocol-Version header -> 200
+try:
+    status, _, body = raw(
+        payload=jsonrpc("ping"), headers={"MCP-Protocol-Version": "2025-06-18"}
+    )
+    ok = status == 200 and (body or {}).get("result") == {}
+    check("good MCP-Protocol-Version -> 200", ok, f"HTTP {status}")
+except Exception as e:
+    check("good MCP-Protocol-Version -> 200", False, repr(e))
+
+# 23. CORS preflight allows the headers browser MCP clients send
+try:
+    status, hdrs, _ = raw(method="OPTIONS", headers={"Origin": "https://claude.ai"})
+    allowed = hdrs.get("access-control-allow-headers", "").lower()
+    ok = (
+        status == 200
+        and "mcp-protocol-version" in allowed
+        and "mcp-session-id" in allowed
+    )
+    check("OPTIONS preflight allows MCP headers", ok, f"HTTP {status} {allowed[:50]}")
+except Exception as e:
+    check("OPTIONS preflight allows MCP headers", False, repr(e))
+
+# 24. tools/list is byte-stable between calls (clients cache it; a stable
+#     list keeps prompt-cache hits alive)
+try:
+    a = rpc("tools/list")["result"]["tools"]
+    b = rpc("tools/list")["result"]["tools"]
+    check("tools/list is deterministic", a == b, f"{len(a)} tools")
+except Exception as e:
+    check("tools/list is deterministic", False, repr(e))
 
 print("\n=== SUMMARY ===")
 n_pass = sum(results)

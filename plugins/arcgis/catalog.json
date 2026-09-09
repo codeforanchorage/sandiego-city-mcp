@@ -1,14 +1,14 @@
 {
  "version": 1,
- "generated_at": "2026-07-10T22:51:13+00:00",
+ "generated_at": "2026-09-09T06:14:01+00:00",
  "services_url": "https://webmaps.sandiego.gov/arcgis/rest/services",
  "stats": {
-  "folders": 36,
-  "services_seen": 343,
-  "services_crawled": 329,
+  "folders": 35,
+  "services_seen": 341,
+  "services_crawled": 327,
   "services_ignored_type": 14,
-  "services_skipped": 15,
-  "layers": 718
+  "services_skipped": 18,
+  "layers": 708
  },
  "skipped": [
   {
@@ -22,6 +22,22 @@
   {
    "service": "DotMaps",
    "reason": "auth required: code 499: Token Required"
+  },
+  {
+   "service": "Enterprise_Aerial_1992/MapServer",
+   "reason": "unreadable: code 503: User couldn't access this resource 'enterprise_aerial_1992.mapserver'."
+  },
+  {
+   "service": "Enterprise_Aerial_1999/MapServer",
+   "reason": "unreadable: code 503: User couldn't access this resource 'enterprise_aerial_1999.mapserver'."
+  },
+  {
+   "service": "Enterprise_Aerial_2002/MapServer",
+   "reason": "unreadable: code 503: User couldn't access this resource 'enterprise_aerial_2002.mapserver'."
+  },
+  {
+   "service": "Enterprise_Aerial_2005/MapServer",
+   "reason": "unreadable: code 503: User couldn't access this resource 'enterprise_aerial_2005.mapserver'."
   },
   {
    "service": "GEOe_Reference",
@@ -57,10 +73,6 @@
   },
   {
    "service": "TED",
-   "reason": "auth required: code 499: Token Required"
-  },
-  {
-   "service": "TEST",
    "reason": "auth required: code 499: Token Required"
   },
   {
@@ -446,10 +458,10 @@
    "max_record_count": 2000,
    "supports_pagination": true,
    "extent": {
-    "xmin": 6150763.820999995,
-    "ymin": 1774444,
-    "xmax": 6613437,
-    "ymax": 2129759.9992499948,
+    "xmin": 6210538.154499993,
+    "ymin": 1777877.2099999934,
+    "xmax": 6606077,
+    "ymax": 2114712.721750006,
     "wkid": 2230
    }
   },
@@ -2947,7 +2959,7 @@
    "supports_pagination": true,
    "extent": {
     "xmin": 6245022.999987885,
-    "ymin": 1780956.000080645,
+    "ymin": 1779382.9999458045,
     "xmax": 6352807.999968633,
     "ymax": 1977583.9998684824,
     "wkid": 2230
@@ -3050,66 +3062,6 @@
     "ymin": 1775470.999895811,
     "xmax": 6360823.000014713,
     "ymax": 1986023.8799703172,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "Enterprise_Aerial_1992/MapServer/0",
-   "name": "This layer is just to allow publishing",
-   "folder": "",
-   "service": "Enterprise_Aerial_1992",
-   "service_type": "MapServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "This cache was built at sangis using 10.3.1 from the original source files. Do Not Rebuild, as it is just the cache tiles that exist at the City.",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6244554.959913567,
-    "ymin": 1775476.0507387966,
-    "xmax": 6360823.619764224,
-    "ymax": 1986027.6745822132,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "Enterprise_Aerial_1999/MapServer/0",
-   "name": "This layer is just to allow publishing",
-   "folder": "",
-   "service": "Enterprise_Aerial_1999",
-   "service_type": "MapServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "This cache was built at sangis using 10.3.1 from the original source files. Do Not Rebuild, as it is just the cache tiles that exist at the City.",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6244554.959913567,
-    "ymin": 1775476.0507387966,
-    "xmax": 6360823.619764224,
-    "ymax": 1986027.6745822132,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "Enterprise_Aerial_2005/MapServer/0",
-   "name": "This layer is just to allow publishing",
-   "folder": "",
-   "service": "Enterprise_Aerial_2005",
-   "service_type": "MapServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "This cache was built at sangis using 10.3.1 from the original source files. Do Not Rebuild, as it is just the cache tiles that exist at the City.",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6244554.959913567,
-    "ymin": 1775476.0507387966,
-    "xmax": 6360823.619764224,
-    "ymax": 1986027.6745822132,
     "wkid": 2230
    }
   },
@@ -3247,7 +3199,7 @@
    "supports_pagination": true,
    "extent": {
     "xmin": -13090529.404148694,
-    "ymin": 3834099.6548445136,
+    "ymin": 3834046.9743070486,
     "xmax": -12924693.802549766,
     "ymax": 3953290.8672976308,
     "wkid": 3857
@@ -3571,106 +3523,6 @@
     "xmax": -13027515.245396528,
     "ymax": 3890326.3087578462,
     "wkid": 3857
-   }
-  },
-  {
-   "dataset_id": "GeocoderMerged/MapServer/0",
-   "name": "ROADS_ALL",
-   "folder": "",
-   "service": "GeocoderMerged",
-   "service_type": "MapServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolyline",
-   "description": "This dataset comprises road centerlines for all roads in San Diego County. Road centerline information is collected from recorded documents (subdivision and parcel maps) and information provided by local jurisidictions (Cities in San Diego County, County of San Diego). Road names and address ranges are as designated by the official address coordinator for each jurisidcition. Jurisdictional info...",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6151036.999968141,
-    "ymin": 1775474.6678674817,
-    "xmax": 6613420.622115061,
-    "ymax": 2129009.9998373985,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "GeocoderMerged/MapServer/1",
-   "name": "PARCELS_ALL",
-   "folder": "",
-   "service": "GeocoderMerged",
-   "service_type": "MapServer",
-   "layer_id": 1,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "Parcels represent taxable pieces of property. A parcel is created by the San Diego County Assessor/Recorder/County Clerk (ARCC) to identify a specific portion of real property that is taxed at a certain rate for a certain owner. Tax parcels are typically the same as a legally subdivided lot but are not necessessarily so. For example, a single owner may own a legally subdivided piece of property...",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6150763.738047466,
-    "ymin": 1775304.094061643,
-    "xmax": 6613437.0000350475,
-    "ymax": 2129759.9993216395,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "GeocoderMerged/MapServer/2",
-   "name": "ADDRAPN",
-   "folder": "",
-   "service": "GeocoderMerged",
-   "service_type": "MapServer",
-   "layer_id": 2,
-   "geometry_type": "esriGeometryPoint",
-   "description": "SITUS address points within the County of San Diego with corresponding Assessor Parcel Number (APN). The dataset includes address fields, x y coordinates, US National Grid coordinates, address type, and placement location (e.g. structure or centroid) for each feature. These are SITUS addresses. That is, they refer to the officially assigned address for a tax parcel. They may not be the house or...",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6152307.00005281,
-    "ymin": 1775442.363798231,
-    "xmax": 6613087.990890548,
-    "ymax": 2129332.531344563,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "GeocoderMerged/MapServer/3",
-   "name": "mergedfcs",
-   "folder": "",
-   "service": "GeocoderMerged",
-   "service_type": "MapServer",
-   "layer_id": 3,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "This layer was updated January, 2018 to reflect the City boundary changes of Greenwood and Castlerock LAFCO annexations. On August 25, 2011, the Redistricting Commission of the City of San Diego voted 7-0 to adopt the Final Redistricting Plan, which specifies the boundaries of districts for San Diego City Council. The Final Plan complies with the redistricting criteria and legal requirements of...",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6202407.001230553,
-    "ymin": 1774443.9993251413,
-    "xmax": 6538407.001473308,
-    "ymax": 2054443.9993633926,
-    "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "Hosted/1042WaterLinesServices/FeatureServer/0",
-   "name": "Polyline_1",
-   "folder": "Hosted",
-   "service": "1042WaterLinesServices",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolyline",
-   "description": "Polyline_1",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6280975.0471782535,
-    "ymin": 1876865.7613448054,
-    "xmax": 6284994.841632083,
-    "ymax": 1897710.525757566,
-    "wkid": 2230
    }
   },
   {
@@ -4233,6 +4085,26 @@
    }
   },
   {
+   "dataset_id": "Hosted/Bridge_to_Home_Program/FeatureServer/0",
+   "name": "Bridge_to_Home_Program",
+   "folder": "Hosted",
+   "service": "Bridge_to_Home_Program",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 2000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6263057.29725267,
+    "ymin": 1783787.8300469816,
+    "xmax": 6318735.648166075,
+    "ymax": 1950943.793962732,
+    "wkid": 2230
+   }
+  },
+  {
    "dataset_id": "Hosted/Bus_Stops/FeatureServer/0",
    "name": "Bus_Stops",
    "folder": "Hosted",
@@ -4353,6 +4225,26 @@
    }
   },
   {
+   "dataset_id": "Hosted/CIP_overlay_projects/FeatureServer/0",
+   "name": "ecp_overlay_segments",
+   "folder": "Hosted",
+   "service": "CIP_overlay_projects",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolyline",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 2000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -13055705.6573,
+    "ymin": 3834934.542000003,
+    "xmax": -13016347.7868,
+    "ymax": 3906708.552000001,
+    "wkid": 3857
+   }
+  },
+  {
    "dataset_id": "Hosted/COSD_FHSZ_LRA/FeatureServer/21",
    "name": "COSD_CalFire_FHSZ_LRA_Dissolve",
    "folder": "Hosted",
@@ -4390,46 +4282,6 @@
     "xmax": 6360823.6197642535,
     "ymax": 1986027.674582228,
     "wkid": 2230
-   }
-  },
-  {
-   "dataset_id": "Hosted/CRRD_Observations/FeatureServer/0",
-   "name": "Observation Points",
-   "folder": "Hosted",
-   "service": "CRRD_Observations",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -17811118.526923772,
-    "ymin": -15538711.096309224,
-    "xmax": 17811118.526923772,
-    "ymax": 15538711.096309224,
-    "wkid": 3857
-   }
-  },
-  {
-   "dataset_id": "Hosted/CRRD_Observations/FeatureServer/1",
-   "name": "Observation Areas",
-   "folder": "Hosted",
-   "service": "CRRD_Observations",
-   "service_type": "FeatureServer",
-   "layer_id": 1,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -17811118.526923772,
-    "ymin": -15538711.096309224,
-    "xmax": 17811118.526923772,
-    "ymax": 15538711.096309224,
-    "wkid": 3857
    }
   },
   {
@@ -4853,26 +4705,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/Clean_and_Renewable_Energy/FeatureServer/0",
-   "name": "Renewable_Energy_Facilities",
-   "folder": "Hosted",
-   "service": "Clean_and_Renewable_Energy",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6254699.889426827,
-    "ymin": 1779667.5364503115,
-    "xmax": 6351482.910427332,
-    "ymax": 1948913.6592434794,
-    "wkid": 2230
-   }
-  },
-  {
    "dataset_id": "Hosted/Cleanup_and_Outreach_FY19_FY23/FeatureServer/0",
    "name": "Cleanup_and_Outreach_FY19_FY23",
    "folder": "Hosted",
@@ -4933,6 +4765,26 @@
    }
   },
   {
+   "dataset_id": "Hosted/ComfortStations_Port_SD_Public_ViewLayer/FeatureServer/0",
+   "name": "ComfortStations_Port_SD_Public",
+   "folder": "Hosted",
+   "service": "ComfortStations_Port_SD_Public_ViewLayer",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6259003.646980837,
+    "ymin": 1834400.1831695437,
+    "xmax": 6284661.122296959,
+    "ymax": 1848540.2173577994,
+    "wkid": 2230
+   }
+  },
+  {
    "dataset_id": "Hosted/Commercial_and_Industrial_Inspections_FY23/FeatureServer/0",
    "name": "Commercial_and_Industrial_Inspections_FY23",
    "folder": "Hosted",
@@ -4950,6 +4802,26 @@
     "xmax": 6352734.669406742,
     "ymax": 22714623.086074904,
     "wkid": 2230
+   }
+  },
+  {
+   "dataset_id": "Hosted/Community_Enhancement_Overlay_Zone__CEOZ_/FeatureServer/0",
+   "name": "Community Enhancement Overlay Zone (CEOZ)",
+   "folder": "Hosted",
+   "service": "Community_Enhancement_Overlay_Zone__CEOZ_",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolygon",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 2000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6292117.996348992,
+    "ymin": 1842092.9811529815,
+    "xmax": 6318703.996326491,
+    "ymax": 1860423.98090823,
+    "wkid": 6426
    }
   },
   {
@@ -5229,26 +5101,6 @@
     "ymin": 3835434.485299997,
     "xmax": -13026827.800999999,
     "ymax": 3902093.8708000034,
-    "wkid": 3857
-   }
-  },
-  {
-   "dataset_id": "Hosted/ElectricalREmap1/FeatureServer/0",
-   "name": "ElectricalAreas",
-   "folder": "Hosted",
-   "service": "ElectricalREmap1",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -13055805.355,
-    "ymin": 3833714.0691,
-    "xmax": -13013815.518199999,
-    "ymax": 3910471.5198,
     "wkid": 3857
    }
   },
@@ -6213,6 +6065,26 @@
    }
   },
   {
+   "dataset_id": "Hosted/MID_CITY_PROPOSED_LU/FeatureServer/0",
+   "name": "Plan Land Use",
+   "folder": "Hosted",
+   "service": "MID_CITY_PROPOSED_LU",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolygon",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 2000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6277611.735081822,
+    "ymin": 1842111.9821704924,
+    "xmax": 6318665.996480048,
+    "ymax": 1888959.9800129682,
+    "wkid": 6426
+   }
+  },
+  {
    "dataset_id": "Hosted/MMCPU_CPIOZ_Exclude_CZ/FeatureServer/6",
    "name": "MMCPU_CPIOZ_Exclude_CZ",
    "folder": "Hosted",
@@ -6430,6 +6302,46 @@
     "xmax": -12933576.5269,
     "ymax": 3947758.5951000005,
     "wkid": 3857
+   }
+  },
+  {
+   "dataset_id": "Hosted/Mid_City_Community_Neighborhoods/FeatureServer/0",
+   "name": "Mid City Community Neighborhoods",
+   "folder": "Hosted",
+   "service": "Mid_City_Community_Neighborhoods",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolygon",
+   "description": "Neighborhoods within the City of San Diego.",
+   "service_description": "Neighborhoods within the City of San Diego.",
+   "max_record_count": 2000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6244558.002302483,
+    "ymin": 1775471.485197872,
+    "xmax": 6360822.996486679,
+    "ymax": 1986027.6621961594,
+    "wkid": 6426
+   }
+  },
+  {
+   "dataset_id": "Hosted/Mid_City_Proposed_Parks/FeatureServer/0",
+   "name": "Mid_City_Proposed_Parks",
+   "folder": "Hosted",
+   "service": "Mid_City_Proposed_Parks",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolygon",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 2000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6293198.339080259,
+    "ymin": 1841943.069450587,
+    "xmax": 6314843.527090594,
+    "ymax": 1862927.313900739,
+    "wkid": 6426
    }
   },
   {
@@ -6670,26 +6582,6 @@
     "xmax": -117.02325914599999,
     "ymax": 32.95665533699997,
     "wkid": 4326
-   }
-  },
-  {
-   "dataset_id": "Hosted/Open_Space_Parcels/FeatureServer/0",
-   "name": "Open_Space_Parcels",
-   "folder": "Hosted",
-   "service": "Open_Space_Parcels",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6247692.8164987415,
-    "ymin": 1780729.9808477312,
-    "xmax": 6362157.999969497,
-    "ymax": 1986928.483476147,
-    "wkid": 2230
    }
   },
   {
@@ -7813,26 +7705,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/RE_District_Electrical_Layer/FeatureServer/0",
-   "name": "RE_District_Electrical_2",
-   "folder": "Hosted",
-   "service": "RE_District_Electrical_Layer",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -13055805.355,
-    "ymin": 3833714.0691,
-    "xmax": -13013815.518199999,
-    "ymax": 3910471.5198,
-    "wkid": 3857
-   }
-  },
-  {
    "dataset_id": "Hosted/RarePlant_ExtentsbySpecies_VIEW/FeatureServer/1",
    "name": "ACIL_MappedExtents",
    "folder": "Hosted",
@@ -8313,83 +8185,103 @@
    }
   },
   {
-   "dataset_id": "Hosted/Regional_Board_Data_for_SWPPPs/FeatureServer/0",
-   "name": "Receiving_Water_Risk",
+   "dataset_id": "Hosted/ReferenceData_1_20260825191904/FeatureServer/0",
+   "name": "Reference Data — Points",
    "folder": "Hosted",
-   "service": "Regional_Board_Data_for_SWPPPs",
+   "service": "ReferenceData_1_20260825191904",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "FS26150541_points",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -117.22132399990261,
+    "ymin": 32.87658200015926,
+    "xmax": -117.18519999958028,
+    "ymax": 32.9304300003443,
+    "wkid": 4326
+   }
+  },
+  {
+   "dataset_id": "Hosted/ReferenceData_2_20260825191904/FeatureServer/0",
+   "name": "Reference Data — Lines",
+   "folder": "Hosted",
+   "service": "ReferenceData_2_20260825191904",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolyline",
+   "description": "FS26150541_lines",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -117.21200500003067,
+    "ymin": 32.90723499999541,
+    "xmax": -117.18319999997993,
+    "ymax": 32.93119000031834,
+    "wkid": 4326
+   }
+  },
+  {
+   "dataset_id": "Hosted/ReferenceData_3_20260825191904/FeatureServer/0",
+   "name": "Reference Data — Areas",
+   "folder": "Hosted",
+   "service": "ReferenceData_3_20260825191904",
    "service_type": "FeatureServer",
    "layer_id": 0,
    "geometry_type": "esriGeometryPolygon",
-   "description": "",
+   "description": "FS26150541_areas",
    "service_description": "",
-   "max_record_count": 2000,
+   "max_record_count": 1000,
    "supports_pagination": true,
    "extent": {
-    "xmin": -13053423.5754,
-    "ymin": 3833714.0691,
-    "xmax": -13013815.518199999,
-    "ymax": 3910471.5198,
-    "wkid": 3857
+    "xmin": -117.19950800019393,
+    "ymin": 32.91898000022701,
+    "xmax": -117.18948000000199,
+    "ymax": 32.92062399959798,
+    "wkid": 4326
    }
   },
   {
-   "dataset_id": "Hosted/Regional_Board_Data_for_SWPPPs/FeatureServer/1",
-   "name": "LS_Final_Update_Clip",
+   "dataset_id": "Hosted/ReferenceData_4_20260825191904/FeatureServer/0",
+   "name": "Reference Data — Labels",
    "folder": "Hosted",
-   "service": "Regional_Board_Data_for_SWPPPs",
+   "service": "ReferenceData_4_20260825191904",
    "service_type": "FeatureServer",
-   "layer_id": 1,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "FS26150541_labels",
    "service_description": "",
-   "max_record_count": 2000,
+   "max_record_count": 1000,
    "supports_pagination": true,
    "extent": {
-    "xmin": -13055805.355,
-    "ymin": 3833714.0691,
-    "xmax": -13013816.8489,
-    "ymax": 3910471.5198,
-    "wkid": 3857
+    "xmin": -117.21915999993399,
+    "ymin": 32.90285999968938,
+    "xmax": -117.18184999977757,
+    "ymax": 32.92709999966536,
+    "wkid": 4326
    }
   },
   {
-   "dataset_id": "Hosted/Regional_Board_Data_for_SWPPPs/FeatureServer/2",
-   "name": "K_Factor_Dissolve_Clip",
+   "dataset_id": "Hosted/ReferenceData_5_20260825191904/FeatureServer/0",
+   "name": "Reference Data — Photo Locations",
    "folder": "Hosted",
-   "service": "Regional_Board_Data_for_SWPPPs",
+   "service": "ReferenceData_5_20260825191904",
    "service_type": "FeatureServer",
-   "layer_id": 2,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "FS26150541_photos",
    "service_description": "",
-   "max_record_count": 2000,
+   "max_record_count": 1000,
    "supports_pagination": true,
    "extent": {
-    "xmin": -13055805.355,
-    "ymin": 3833714.0691,
-    "xmax": -13013815.518199999,
-    "ymax": 3910471.5198,
-    "wkid": 3857
-   }
-  },
-  {
-   "dataset_id": "Hosted/Regional_Board_Data_for_SWPPPs/FeatureServer/3",
-   "name": "EI_Zone_Clip",
-   "folder": "Hosted",
-   "service": "Regional_Board_Data_for_SWPPPs",
-   "service_type": "FeatureServer",
-   "layer_id": 3,
-   "geometry_type": "esriGeometryPolygon",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -13055805.355,
-    "ymin": 3833714.0691,
-    "xmax": -13013815.518199999,
-    "ymax": 3910471.5198,
-    "wkid": 3857
+    "xmin": -117.21001199985386,
+    "ymin": 32.9174040003943,
+    "xmax": -117.18972799974728,
+    "ymax": 32.92314799998036,
+    "wkid": 4326
    }
   },
   {
@@ -9132,26 +9024,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/Streams/FeatureServer/17",
-   "name": "Streams",
-   "folder": "Hosted",
-   "service": "Streams",
-   "service_type": "FeatureServer",
-   "layer_id": 17,
-   "geometry_type": "esriGeometryPolyline",
-   "description": "<DIV STYLE=\"text-align:Left;\"><DIV><DIV><P STYLE=\"margin:0 0 14 0;\"><SPAN><SPAN>Description from USGS: The National Hydrography Dataset NHD is a comprehensive set of digital spatial data that contains information about surface water features such as lakes, ponds, streams, rivers, springs, and wells. Within the NHD, surface water features are combined to form “reaches”, which provide the framewo...",
-   "service_description": "<DIV STYLE=\"text-align:Left;\"><DIV><DIV><P STYLE=\"margin:0 0 14 0;\"><SPAN><SPAN>Description from USGS: The National Hydrography Dataset NHD is a comprehensive set of digital spatial data that contains information about surface water features such as lakes, ponds, streams, rivers, springs, and wells. Within the NHD, surface water features are combined to form “reaches”, which provide the framewo...",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -13038717.169,
-    "ymin": 3841060.2529999986,
-    "xmax": -12951889.8547,
-    "ymax": 3926899.244900003,
-    "wkid": 3857
-   }
-  },
-  {
    "dataset_id": "Hosted/Subdivisionsab2911/FeatureServer/0",
    "name": "Subdivisions_AB2911SanDiego",
    "folder": "Hosted",
@@ -9272,26 +9144,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/TestForAddressLayer/FeatureServer/0",
-   "name": "TestData",
-   "folder": "Hosted",
-   "service": "TestForAddressLayer",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6245013.209653243,
-    "ymin": 1777921.1669115573,
-    "xmax": 6378836.068319336,
-    "ymax": 1997260.193127647,
-    "wkid": 2230
-   }
-  },
-  {
    "dataset_id": "Hosted/Test_Stations/FeatureServer/0",
    "name": "Test_Stations",
    "folder": "Hosted",
@@ -9312,26 +9164,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/Trails_Master_Plan_Points/FeatureServer/0",
-   "name": "Trails_Master_Plan_Points",
-   "folder": "Hosted",
-   "service": "Trails_Master_Plan_Points",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": "NaN",
-    "ymin": "NaN",
-    "xmax": "NaN",
-    "ymax": "NaN",
-    "wkid": 3857
-   }
-  },
-  {
    "dataset_id": "Hosted/UCSD_CAD_Premises/FeatureServer/0",
    "name": "Sheet1",
    "folder": "Hosted",
@@ -9348,26 +9180,6 @@
     "ymin": 3877119.8083999977,
     "xmax": -13048131.9946,
     "ymax": 3881373.3923999965,
-    "wkid": 3857
-   }
-  },
-  {
-   "dataset_id": "Hosted/USGS_Gauges/FeatureServer/5",
-   "name": "USGS_Gauges",
-   "folder": "Hosted",
-   "service": "USGS_Gauges",
-   "service_type": "FeatureServer",
-   "layer_id": 5,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -13043155.2125,
-    "ymin": 3841173.3132999986,
-    "xmax": -12971580.401,
-    "ymax": 3910667.177199997,
     "wkid": 3857
    }
   },
@@ -9512,26 +9324,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/Waterways/FeatureServer/27",
-   "name": "Waterways",
-   "folder": "Hosted",
-   "service": "Waterways",
-   "service_type": "FeatureServer",
-   "layer_id": 27,
-   "geometry_type": "esriGeometryPolyline",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 2000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": 6362422.046685383,
-    "ymin": 1805706.392836973,
-    "xmax": 6403400.533625886,
-    "ymax": 1823748.80130589,
-    "wkid": 2230
-   }
-  },
-  {
    "dataset_id": "Hosted/Year_round_Sidewalk_Vending_Ordinance/FeatureServer/0",
    "name": "Year-round",
    "folder": "Hosted",
@@ -9549,6 +9341,26 @@
     "xmax": 6302847.599233583,
     "ymax": 1894066.9999081492,
     "wkid": 2230
+   }
+  },
+  {
+   "dataset_id": "Hosted/_Mid_City_Open_Space_view/FeatureServer/0",
+   "name": "Updated Mid City Open Space",
+   "folder": "Hosted",
+   "service": "_Mid_City_Open_Space_view",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPolygon",
+   "description": "This dataset is a collection of the current base zone designations applied to property in the City of San Diego, as per the Official Zoning Map adopted by the City Council on February 28, 2006, and all subsequent updates.",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": 6291281.110959187,
+    "ymin": 1841904.8080441356,
+    "xmax": 6315841.4260134995,
+    "ymax": 1863603.1632708907,
+    "wkid": 6426
    }
   },
   {
@@ -9641,26 +9453,6 @@
    "geometry_type": "esriGeometryPoint",
    "description": "",
    "service_description": "PLANNING GROUP STANDARDIZED ANNUAL REPORT",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -180,
-    "ymin": -90,
-    "xmax": 180,
-    "ymax": 90,
-    "wkid": 4326
-   }
-  },
-  {
-   "dataset_id": "Hosted/service_12a016581c32478a8fa8ef4a0bb279bb_form/FeatureServer/0",
-   "name": "ahdmp_community_survey",
-   "folder": "Hosted",
-   "service": "service_12a016581c32478a8fa8ef4a0bb279bb_form",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
    "max_record_count": 1000,
    "supports_pagination": true,
    "extent": {
@@ -9832,6 +9624,66 @@
    }
   },
   {
+   "dataset_id": "Hosted/service_244d3c4648d240d7a59ebfe66fc9379a_form/FeatureServer/0",
+   "name": "sdctmp_community_survey",
+   "folder": "Hosted",
+   "service": "service_244d3c4648d240d7a59ebfe66fc9379a_form",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -180,
+    "ymin": -90,
+    "xmax": 180,
+    "ymax": 90,
+    "wkid": 4326
+   }
+  },
+  {
+   "dataset_id": "Hosted/service_244d3c4648d240d7a59ebfe66fc9379a_form/FeatureServer/1",
+   "name": "georepeat",
+   "folder": "Hosted",
+   "service": "service_244d3c4648d240d7a59ebfe66fc9379a_form",
+   "service_type": "FeatureServer",
+   "layer_id": 1,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -180,
+    "ymin": -90,
+    "xmax": 180,
+    "ymax": 90,
+    "wkid": 4326
+   }
+  },
+  {
+   "dataset_id": "Hosted/service_244d3c4648d240d7a59ebfe66fc9379a_form/FeatureServer/2",
+   "name": "geotrailopp",
+   "folder": "Hosted",
+   "service": "service_244d3c4648d240d7a59ebfe66fc9379a_form",
+   "service_type": "FeatureServer",
+   "layer_id": 2,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -180,
+    "ymin": -90,
+    "xmax": 180,
+    "ymax": 90,
+    "wkid": 4326
+   }
+  },
+  {
    "dataset_id": "Hosted/service_4089448c55944493a7784d798abec067/FeatureServer/0",
    "name": "survey",
    "folder": "Hosted",
@@ -9981,26 +9833,6 @@
    "geometry_type": "esriGeometryPoint",
    "description": "",
    "service_description": "Arts and Culture 2025 CCSD",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -180,
-    "ymin": -90,
-    "xmax": 180,
-    "ymax": 90,
-    "wkid": 4326
-   }
-  },
-  {
-   "dataset_id": "Hosted/service_6b0f7a2b904548cc8dc999a43781b976/FeatureServer/0",
-   "name": "Form_2",
-   "folder": "Hosted",
-   "service": "service_6b0f7a2b904548cc8dc999a43781b976",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "Managment Questions",
    "max_record_count": 1000,
    "supports_pagination": true,
    "extent": {
@@ -10292,6 +10124,46 @@
    }
   },
   {
+   "dataset_id": "Hosted/service_d7521801c99f4176bc04b23038ce04ab/FeatureServer/0",
+   "name": "Form_2",
+   "folder": "Hosted",
+   "service": "service_d7521801c99f4176bc04b23038ce04ab",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "Form 2",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -180,
+    "ymin": -90,
+    "xmax": 180,
+    "ymax": 90,
+    "wkid": 4326
+   }
+  },
+  {
+   "dataset_id": "Hosted/service_d7521801c99f4176bc04b23038ce04ab_form/FeatureServer/0",
+   "name": "Form_2",
+   "folder": "Hosted",
+   "service": "service_d7521801c99f4176bc04b23038ce04ab_form",
+   "service_type": "FeatureServer",
+   "layer_id": 0,
+   "geometry_type": "esriGeometryPoint",
+   "description": "",
+   "service_description": "",
+   "max_record_count": 1000,
+   "supports_pagination": true,
+   "extent": {
+    "xmin": -180,
+    "ymin": -90,
+    "xmax": 180,
+    "ymax": 90,
+    "wkid": 4326
+   }
+  },
+  {
    "dataset_id": "Hosted/service_e1a1259f02624622b11a505782bcfeb9/FeatureServer/0",
    "name": "Planning_CIP_Infrastructure_Survey_XSpanishX",
    "folder": "Hosted",
@@ -10392,26 +10264,6 @@
    }
   },
   {
-   "dataset_id": "Hosted/service_f8418d89295e4b58afeda92b935e45f8_form/FeatureServer/0",
-   "name": "sdctmp_community_survey",
-   "folder": "Hosted",
-   "service": "service_f8418d89295e4b58afeda92b935e45f8_form",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -180,
-    "ymin": -90,
-    "xmax": 180,
-    "ymax": 90,
-    "wkid": 4326
-   }
-  },
-  {
    "dataset_id": "Hosted/street_paving_plan_datasd_V2/FeatureServer/0",
    "name": "street_paving_plan_datasd",
    "folder": "Hosted",
@@ -10441,46 +10293,6 @@
    "geometry_type": "esriGeometryPoint",
    "description": "",
    "service_description": "Feature service view of results for the survey 4cebcde4b64d4fcf812b09f6d1c28c9d",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -180,
-    "ymin": -90,
-    "xmax": 180,
-    "ymax": 90,
-    "wkid": 4326
-   }
-  },
-  {
-   "dataset_id": "Hosted/survey123_cfcaebc73dbb49909e4608b4a447b5be_fieldworker/FeatureServer/0",
-   "name": "survey",
-   "folder": "Hosted",
-   "service": "survey123_cfcaebc73dbb49909e4608b4a447b5be_fieldworker",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "View Feature Service (fieldworker) for survey cfcaebc73dbb49909e4608b4a447b5be",
-   "max_record_count": 1000,
-   "supports_pagination": true,
-   "extent": {
-    "xmin": -180,
-    "ymin": -90,
-    "xmax": 180,
-    "ymax": 90,
-    "wkid": 4326
-   }
-  },
-  {
-   "dataset_id": "Hosted/survey123_e5fdac7ef4c549d1b3bec6ce6cbb7fbc_stakeholder/FeatureServer/0",
-   "name": "Form_2",
-   "folder": "Hosted",
-   "service": "survey123_e5fdac7ef4c549d1b3bec6ce6cbb7fbc_stakeholder",
-   "service_type": "FeatureServer",
-   "layer_id": 0,
-   "geometry_type": "esriGeometryPoint",
-   "description": "",
-   "service_description": "View Feature Service (stakeholder) for survey e5fdac7ef4c549d1b3bec6ce6cbb7fbc",
    "max_record_count": 1000,
    "supports_pagination": true,
    "extent": {
@@ -12924,8 +12736,8 @@
    "max_record_count": 2000,
    "supports_pagination": true,
    "extent": {
-    "xmin": 6318144.7845183015,
-    "ymin": 1801691.6587404758,
+    "xmin": 6301544.550330386,
+    "ymin": 1801722.7840063125,
     "xmax": 6382146.917012468,
     "ymax": 1976755.911629647,
     "wkid": 2230
@@ -13065,7 +12877,7 @@
    "supports_pagination": true,
    "extent": {
     "xmin": 6151558,
-    "ymin": 1778032.0097499937,
+    "ymin": 1777886.8369999975,
     "xmax": 6606058.694999993,
     "ymax": 2102188,
     "wkid": 2230
@@ -13367,7 +13179,7 @@
     "xmin": -177.03232099999997,
     "ymin": -122.32024299999995,
     "xmax": 121.56514700000002,
-    "ymax": 52.43409200000008,
+    "ymax": 57.06951400000003,
     "wkid": 4269
    }
   },
@@ -13387,7 +13199,7 @@
     "xmin": -177.03232099999997,
     "ymin": -122.32024299999995,
     "xmax": 121.56514700000002,
-    "ymax": 52.43409200000008,
+    "ymax": 57.06951400000003,
     "wkid": 4269
    }
   },
@@ -13407,7 +13219,7 @@
     "xmin": -177.03232099999997,
     "ymin": -122.32024299999995,
     "xmax": 121.56514700000002,
-    "ymax": 52.43409200000008,
+    "ymax": 57.06951400000003,
     "wkid": 4269
    }
   },
@@ -13427,7 +13239,7 @@
     "xmin": -177.03232099999997,
     "ymin": -122.32024299999995,
     "xmax": 121.56514700000002,
-    "ymax": 52.43409200000008,
+    "ymax": 57.06951400000003,
     "wkid": 4269
    }
   },
@@ -14404,9 +14216,9 @@
    "max_record_count": 2000,
    "supports_pagination": true,
    "extent": {
-    "xmin": -117.28164339999995,
-    "ymin": 32.54421456000006,
-    "xmax": -117.00368069999996,
+    "xmin": -117.28135723999998,
+    "ymin": 5.684341886080802e-14,
+    "xmax": 5.684341886080802e-14,
     "ymax": 33.04840705000004,
     "wkid": 4326
    }
