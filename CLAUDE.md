@@ -84,4 +84,10 @@ Copy `config-example.yaml` to `config.yaml`. Enable exactly one plugin. Config s
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs ruff lint/format, pip-audit, pytest with coverage, and Go tests on push to main/develop and on PRs.
+GitHub Actions (`.github/workflows/ci.yml`) runs on push to main/develop and on PRs: ruff lint + `format --check` (ruff pinned to 0.15.1, matching `.pre-commit-config.yaml` -- install that exact version locally or `format --check` disagrees), config validation with a **timeout-ladder assertion** (plugin HTTP timeout < `aws.lambda_timeout` < API Gateway's hard 29s), a bundled-catalog load check, pytest with coverage, pip-audit on runtime deps, and Go vet/test for the client.
+
+## Conformance invariants (tested; keep them true)
+
+- **Tool metadata**: every tool declares a top-level `title` and `annotations={"readOnlyHint": True, "openWorldHint": True}`; never `idempotentHint`. Titles live in `_TOOL_TITLES` in `plugins/arcgis/plugin.py` and should stay identical across the GIS forks.
+- **Error classification**: anything the caller can cause raises `core.interfaces.ToolInputError` (logged at WARNING, no traceback). Exactly one plain `ValueError` remains in the plugin -- ArcGIS returning non-JSON, a genuine upstream fault that keeps its traceback -- and the shared validators raise none. A drift-guard test pins both counts; classify any new raise deliberately. Read numeric arguments through `_int_arg` / `_float_arg`, never bare `int()`/`float()` over `arguments`.
+- **Timeout ladder**: `plugins.arcgis.timeout` (20s) < `aws.lambda_timeout` (28s) < API Gateway 29s. `config.yaml` wins over `prod.tfvars` for timeout/memory; `prod.tfvars` wins for `lambda_name`.

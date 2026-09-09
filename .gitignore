@@ -233,3 +233,6 @@ examples/
 
 # Claude Code local settings
 .claude/
+
+# Terraform plan files are per-run artifacts, never source
+tfplan

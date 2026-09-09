@@ -7,5 +7,10 @@
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 
+# Pinned to match .pre-commit-config.yaml and CI: ruff's formatter is not
+# stable across releases, so a floating version makes `format --check`
+# non-deterministic between machines.
+ruff==0.15.1
+
 # Pre-commit hooks (run: pre-commit install)
 pre-commit>=4.0.0
