@@ -6,7 +6,10 @@ handling, and data formatting. No network access: the catalog is a temp
 file and HTTP is mocked.
 """
 
+import ast
 import json
+import logging
+from pathlib import Path
 
 import pytest
 from unittest.mock import AsyncMock, Mock
@@ -14,7 +17,8 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 from pydantic import ValidationError
 
-from core.interfaces import PluginType
+from core.interfaces import PluginType, ToolInputError
+from core.plugin_manager import PluginManager
 from plugins.arcgis.catalog_index import CatalogIndex, load_manifest
 from plugins.arcgis.config_schema import ArcGISPluginConfig
 from plugins.arcgis.plugin import ArcGISPlugin
@@ -844,3 +848,223 @@ class TestOrderByValidator:
     def test_rejects_invalid_entries(self, bad):
         with pytest.raises(ValueError):
             OrderByValidator.validate(bad)
+
+
+# ── Tool metadata (MCP tier-2) ─────────────────────────────────────────
+
+
+class TestToolMetadata:
+    """Title and annotations on every tool, emitted where the spec puts them."""
+
+    @staticmethod
+    def _manager(plugin):
+        manager = PluginManager({})
+        manager.plugins = {"arcgis": plugin}
+        return manager
+
+    def test_every_tool_declares_a_title(self, arcgis_config):
+        """The wire `name` is plugin-prefixed and reads badly in a picker."""
+        for t in make_plugin(arcgis_config).get_tools():
+            assert t.title, f"{t.name} has no title"
+            assert t.title != t.name
+
+    def test_title_is_emitted_top_level_not_as_an_annotation(self, arcgis_config):
+        """`title` is a top-level Tool field via BaseMetadata; display
+        precedence is title -> annotations.title -> name."""
+        for tool in self._manager(make_plugin(arcgis_config)).get_all_tools():
+            assert "title" in tool, tool["name"]
+            assert "title" not in tool.get("annotations", {}), tool["name"]
+
+    def test_every_tool_is_read_only_and_open_world(self, arcgis_config):
+        """readOnlyHint lets clients skip per-call confirmation; every tool
+        reaches an external ArcGIS Server, hence openWorldHint."""
+        for t in make_plugin(arcgis_config).get_tools():
+            assert t.annotations["readOnlyHint"] is True, t.name
+            assert t.annotations["openWorldHint"] is True, t.name
+
+    def test_idempotent_hint_is_not_set(self, arcgis_config):
+        """Documented as meaningful only when readOnlyHint is false."""
+        for t in make_plugin(arcgis_config).get_tools():
+            assert "idempotentHint" not in t.annotations, t.name
+
+    def test_tools_list_ordering_is_deterministic(self, arcgis_config):
+        """Stable ordering lets clients cache tools/list and keeps
+        prompt-cache hits alive."""
+        manager = self._manager(make_plugin(arcgis_config))
+        first = [t["name"] for t in manager.get_all_tools()]
+        for _ in range(3):
+            assert [t["name"] for t in manager.get_all_tools()] == first
+
+    def test_tool_names_are_prefixed(self, arcgis_config):
+        for tool in self._manager(make_plugin(arcgis_config)).get_all_tools():
+            assert tool["name"].startswith("arcgis__")
+
+
+# ── Error classification drift guards ──────────────────────────────────
+
+
+class TestErrorClassificationDoesNotDrift:
+    """Static guards so a new raise or coercion has to be classified
+    deliberately rather than silently becoming log noise."""
+
+    PLUGIN_SRC = Path(__file__).resolve().parents[1] / "plugins/arcgis/plugin.py"
+    VALIDATOR_SRC = (
+        Path(__file__).resolve().parents[1] / "plugins/arcgis/where_validator.py"
+    )
+
+    def test_only_the_upstream_fault_raises_a_plain_value_error(self):
+        """Exactly one plain ValueError: ArcGIS returning non-JSON.
+        Everything the caller can cause is a ToolInputError, which logs
+        at WARNING with no traceback."""
+        src = self.PLUGIN_SRC.read_text(encoding="utf-8")
+        assert src.count("raise ValueError(") == 1, (
+            "a new plain ValueError was added to the arcgis plugin -- "
+            "classify it deliberately: caller mistake -> ToolInputError, "
+            "genuine upstream/server fault -> ValueError (keeps its traceback)"
+        )
+        assert "non-JSON response" in src
+
+    def test_shared_validators_only_raise_caller_errors(self):
+        src = self.VALIDATOR_SRC.read_text(encoding="utf-8")
+        assert src.count("raise ValueError(") == 0, (
+            "the ArcGIS validators only ever reject caller input; a plain "
+            "ValueError here would be logged as a server fault"
+        )
+
+    def test_every_numeric_coercion_of_caller_input_is_guarded(self):
+        """AST sweep, not a regex: inline forms like
+        `min(int(arguments.get("limit", 20)), 100)` hide from line searches."""
+        tree = ast.parse(self.PLUGIN_SRC.read_text(encoding="utf-8"))
+        guarded = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try):
+                continue
+            handled = any(
+                isinstance(h, ast.ExceptHandler)
+                and (
+                    "ToolInputError" in ast.unparse(h)
+                    or "ValueError" in ast.unparse(h.type or ast.Constant(""))
+                )
+                for h in node.handlers
+            )
+            if handled:
+                for stmt in node.body:
+                    for sub in ast.walk(stmt):
+                        if hasattr(sub, "lineno"):
+                            guarded.add(sub.lineno)
+
+        unguarded = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in ("int", "float")
+            ):
+                inner = ast.unparse(node)
+                if (
+                    any(tok in inner for tok in ("arguments.get", "arguments["))
+                    and node.lineno not in guarded
+                ):
+                    unguarded.append(f"line {node.lineno}: {inner}")
+        assert not unguarded, (
+            "numeric coercion of caller input outside a guard:\n  "
+            + "\n  ".join(unguarded)
+        )
+
+
+# ── Caller errors log at WARNING, faults keep their traceback ──────────
+
+
+class TestCallerErrorLogging:
+    @staticmethod
+    def _records(caplog, level=logging.WARNING):
+        return [r for r in caplog.records if r.levelno >= level]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "tool,args,fragment",
+        [
+            ("get_dataset", {"dataset_id": "nope"}, "Invalid dataset_id"),
+            ("get_dataset", {"dataset_id": "../x/MapServer/1"}, "Invalid dataset_id"),
+            ("query_data", {"dataset_id": ZONES_ID, "limit": "many"}, "limit must be"),
+            ("search_datasets", {"q": "zoning", "limit": "lots"}, "limit must be"),
+            (
+                "spatial_query_point",
+                {"item_id": MHPA_ID, "lon": -200, "lat": 32.5},
+                "lon must be between",
+            ),
+            (
+                "spatial_query_point",
+                {"item_id": MHPA_ID, "lon": "west", "lat": 32.5},
+                "lon must be a number",
+            ),
+            (
+                "query_data",
+                {"dataset_id": ZONES_ID, "where": "1=1; DROP TABLE zones"},
+                "Forbidden",
+            ),
+            (
+                "query_data",
+                {"dataset_id": ZONES_ID, "order_by": "ACRES; DROP"},
+                "order_by",
+            ),
+        ],
+    )
+    async def test_bad_arguments_log_warning_never_a_traceback(
+        self, arcgis_config, caplog, tool, args, fragment
+    ):
+        plugin = make_plugin(arcgis_config)
+        with caplog.at_level(logging.WARNING):
+            result = await plugin.execute_tool(tool, args)
+
+        assert result.success is False
+        assert fragment in result.error_message
+        records = self._records(caplog)
+        assert records, "expected a WARNING record"
+        assert all(r.levelno == logging.WARNING for r in records), [
+            r.levelname for r in records
+        ]
+        assert all(r.exc_info is None for r in records), (
+            f"{tool} logged a traceback for a caller error"
+        )
+
+    @pytest.mark.asyncio
+    async def test_upstream_fault_still_logs_error_with_traceback(
+        self, arcgis_config, caplog
+    ):
+        """ArcGIS returning non-JSON is NOT a caller error -- it must keep
+        its ERROR level and its traceback."""
+        plugin = make_plugin(arcgis_config)
+        resp = Mock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/html"}
+        resp.text = "<html>gateway error</html>"
+        resp.raise_for_status = Mock()
+        resp.json = Mock(side_effect=ValueError("no json"))
+        plugin.feature_client.get = AsyncMock(return_value=resp)
+
+        with caplog.at_level(logging.WARNING):
+            result = await plugin.execute_tool("query_data", {"dataset_id": ZONES_ID})
+
+        assert result.success is False
+        assert "non-JSON" in result.error_message
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors, "an upstream fault must still log at ERROR"
+        assert any(r.exc_info is not None for r in errors), (
+            "an upstream fault must keep its traceback"
+        )
+
+    def test_tool_input_error_is_a_value_error(self):
+        """Subclassing keeps every existing `except ValueError` working."""
+        assert issubclass(ToolInputError, ValueError)
+
+    def test_where_validator_masks_quoted_literals(self):
+        """A legitimate data value containing a blocked token is data, not
+        SQL, and must not trip the injection filter."""
+        assert (
+            WhereValidator.validate("OWNER = 'SMITH; JONES'")
+            == "OWNER = 'SMITH; JONES'"
+        )
+        assert WhereValidator.validate("NAME LIKE '%UNION%'") == "NAME LIKE '%UNION%'"
+        with pytest.raises(ToolInputError, match="Unbalanced"):
+            WhereValidator.validate("NAME = 'open")

@@ -106,6 +106,20 @@ try:
         "arcgis__geocode_address",
     }
     check("tools/list (8 tools)", set(tools) == expected, f"{sorted(tools)}")
+    # MCP tier-2 metadata: a top-level display title and read-only
+    # annotations on every tool (never idempotentHint on a read-only tool).
+    missing = sorted(
+        n
+        for n, t in tools.items()
+        if not t.get("title")
+        or t.get("annotations", {}).get("readOnlyHint") is not True
+        or "idempotentHint" in t.get("annotations", {})
+    )
+    check(
+        "tools/list metadata (title + readOnlyHint)",
+        not missing,
+        "all 8 carry title + readOnlyHint" if not missing else f"missing: {missing}",
+    )
 except Exception as e:
     check("tools/list (8 tools)", False, repr(e))
 

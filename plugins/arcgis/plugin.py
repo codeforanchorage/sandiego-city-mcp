@@ -22,7 +22,13 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from core.interfaces import DataPlugin, PluginType, ToolDefinition, ToolResult
+from core.interfaces import (
+    DataPlugin,
+    PluginType,
+    ToolDefinition,
+    ToolInputError,
+    ToolResult,
+)
 from plugins.arcgis.catalog_index import (
     AGGREGATABLE_FIELDS,
     CatalogIndex,
@@ -69,6 +75,26 @@ _ID_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_\-. ()]+$")
 _MAX_QUERY_PAGES = 20
 
 _EXAMPLE_ID = "Planning/PLN_LongRangePlanning/MapServer/7"
+
+# Every tool is a read-only query against public GIS data (readOnlyHint lets
+# clients skip per-call confirmation) that reaches an external service
+# (openWorldHint). idempotentHint is deliberately absent: the schema defines
+# it as meaningful only when readOnlyHint is false.
+_READ_ONLY_TOOL = {"readOnlyHint": True, "openWorldHint": True}
+
+# Display titles (top-level Tool.title, precedence title -> annotations.title
+# -> name). The wire name is plugin-prefixed (arcgis__query_data) and reads
+# badly in a tool picker. Keep these identical across the GIS forks.
+_TOOL_TITLES = {
+    "search_datasets": "Search GIS Layers",
+    "get_dataset": "Layer Details",
+    "get_aggregations": "Catalog Facet Counts",
+    "query_data": "Query Layer Records",
+    "get_layer_schema": "Layer Field Schema",
+    "get_distinct_values": "Distinct Field Values",
+    "spatial_query_point": "Features at a Point",
+    "geocode_address": "Geocode Address",
+}
 
 
 class ArcGISPlugin(DataPlugin):
@@ -140,6 +166,8 @@ class ArcGISPlugin(DataPlugin):
         return [
             ToolDefinition(
                 name="search_datasets",
+                title=_TOOL_TITLES["search_datasets"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     f"Search {city}'s GIS layer catalog (an indexed crawl of "
                     "the city's ArcGIS Server services directory). Matches "
@@ -178,6 +206,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="get_dataset",
+                title=_TOOL_TITLES["get_dataset"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "Get metadata for a specific layer by dataset_id (a path "
                     f"like '{_EXAMPLE_ID}'): geometry type, description, "
@@ -199,6 +229,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="get_aggregations",
+                title=_TOOL_TITLES["get_aggregations"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "Get facet counts of the indexed layers by a catalog "
                     "field -- explore what the directory holds by 'folder', "
@@ -225,6 +257,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="query_data",
+                title=_TOOL_TITLES["query_data"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "Query records from a layer by dataset_id. The output "
                     "leads with TOTAL MATCHING, the full count of records "
@@ -275,6 +309,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="get_layer_schema",
+                title=_TOOL_TITLES["get_layer_schema"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "List a layer's fields (name, type, alias, coded values) "
                     "so you can write a correct query_data WHERE clause "
@@ -306,6 +342,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="get_distinct_values",
+                title=_TOOL_TITLES["get_distinct_values"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "List the distinct values in one field of a layer -- to "
                     "confirm the exact spelling/format of codes before "
@@ -353,6 +391,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="spatial_query_point",
+                title=_TOOL_TITLES["spatial_query_point"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "Point-in-polygon lookup: return the attributes of every "
                     "polygon in a layer that contains a point -- 'which zone / "
@@ -419,6 +459,8 @@ class ArcGISPlugin(DataPlugin):
             ),
             ToolDefinition(
                 name="geocode_address",
+                title=_TOOL_TITLES["geocode_address"],
+                annotations=_READ_ONLY_TOOL,
                 description=(
                     "Convert a street address to coordinates (lon/lat, WGS84) via "
                     "the US Census geocoder. Use the result with "
@@ -439,13 +481,43 @@ class ArcGISPlugin(DataPlugin):
             ),
         ]
 
+    @staticmethod
+    def _int_arg(arguments: Dict[str, Any], name: str, default: int) -> int:
+        """Read an integer argument, rejecting garbage as a caller error.
+
+        A bare ``int()`` over caller input raises a stdlib ValueError that
+        logs as a server fault and tells the caller nothing useful.
+        """
+        raw = arguments.get(name, default)
+        if raw is None:
+            return default
+        if isinstance(raw, bool):
+            raise ToolInputError(f"{name} must be an integer (got {raw!r})")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise ToolInputError(f"{name} must be an integer (got {raw!r})") from None
+
+    @staticmethod
+    def _float_arg(arguments: Dict[str, Any], name: str) -> Optional[float]:
+        """Read an optional float argument, rejecting garbage as a caller error."""
+        raw = arguments.get(name)
+        if raw is None:
+            return None
+        if isinstance(raw, bool):
+            raise ToolInputError(f"{name} must be a number (got {raw!r})")
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            raise ToolInputError(f"{name} must be a number (got {raw!r})") from None
+
     async def execute_tool(
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> ToolResult:
         try:
             if tool_name == "search_datasets":
                 q = arguments.get("q", "")
-                limit = arguments.get("limit", 10)
+                limit = self._int_arg(arguments, "limit", 10)
                 item_type = arguments.get("type")
                 datasets = await self.search_datasets(q, limit, item_type)
                 return ToolResult(
@@ -499,7 +571,7 @@ class ArcGISPlugin(DataPlugin):
                     )
                 where = arguments.get("where", "1=1")
                 out_fields = arguments.get("out_fields", "*")
-                limit = arguments.get("limit", 100)
+                limit = self._int_arg(arguments, "limit", 100)
                 filters = {"where": where, "out_fields": out_fields}
                 if arguments.get("order_by"):
                     filters["order_by"] = arguments["order_by"]
@@ -553,7 +625,7 @@ class ArcGISPlugin(DataPlugin):
                     field,
                     arguments.get("like"),
                     arguments.get("where", "1=1"),
-                    arguments.get("limit", 200),
+                    self._int_arg(arguments, "limit", 200),
                 )
                 return ToolResult(
                     content=[
@@ -567,8 +639,8 @@ class ArcGISPlugin(DataPlugin):
 
             elif tool_name == "spatial_query_point":
                 item_id = arguments.get("item_id")
-                lon = arguments.get("lon")
-                lat = arguments.get("lat")
+                lon = self._float_arg(arguments, "lon")
+                lat = self._float_arg(arguments, "lat")
                 address = arguments.get("address")
                 if not item_id:
                     return ToolResult(
@@ -597,7 +669,7 @@ class ArcGISPlugin(DataPlugin):
                         success=False,
                         error_message="Provide either `address` or both `lon` and `lat`.",
                     )
-                limit = arguments.get("limit", 10)
+                limit = self._int_arg(arguments, "limit", 10)
                 records = await self.spatial_query_point(
                     item_id,
                     lon,
@@ -643,7 +715,19 @@ class ArcGISPlugin(DataPlugin):
                     error_message=f"Unknown tool: {tool_name}",
                 )
 
+        except ToolInputError as e:
+            # The caller passed something invalid. WARNING, no traceback:
+            # a stack trace here is noise that buries real faults, and the
+            # message alone already tells the caller how to fix the call.
+            logger.warning(f"Invalid arguments for tool {tool_name}: {e}")
+            return ToolResult(
+                content=[],
+                success=False,
+                error_message=str(e) if str(e) else "Invalid tool arguments",
+            )
         except Exception as e:
+            # Everything else IS a server or upstream fault -- keep the
+            # traceback, that is what these logs are for.
             logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
             return ToolResult(
                 content=[],
@@ -662,21 +746,21 @@ class ArcGISPlugin(DataPlugin):
         shapes survive — no absolute URLs, no traversal.
         """
         if not dataset_id or not isinstance(dataset_id, str):
-            raise ValueError("dataset_id is required")
+            raise ToolInputError("dataset_id is required")
         parts = [p for p in dataset_id.strip().strip("/").split("/") if p]
         if (
             len(parts) < 3
             or parts[-2] not in ("MapServer", "FeatureServer")
             or not parts[-1].isdigit()
         ):
-            raise ValueError(
+            raise ToolInputError(
                 f"Invalid dataset_id {dataset_id!r}. Expected a path like "
                 f"'{_EXAMPLE_ID}' (see search_datasets)."
             )
         for segment in parts[:-2]:
             # Dots are legal inside names but a dot-only segment is traversal.
             if not _ID_SEGMENT_RE.match(segment) or segment.strip(".") == "":
-                raise ValueError(
+                raise ToolInputError(
                     f"Invalid dataset_id segment {segment!r} in {dataset_id!r}."
                 )
         return "/".join(parts)
@@ -711,7 +795,7 @@ class ArcGISPlugin(DataPlugin):
         meta = response.json()
         err = meta.get("error")
         if err:
-            raise ValueError(
+            raise ToolInputError(
                 f"Dataset {dataset_id!r} is not in the catalog and its layer "
                 f"endpoint returned an error (code {err.get('code', 'unknown')}): "
                 f"{err.get('message', 'Unknown error')}"
@@ -760,7 +844,7 @@ class ArcGISPlugin(DataPlugin):
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         if limit < 1:
-            raise ValueError(f"limit must be at least 1 (got {limit})")
+            raise ToolInputError(f"limit must be at least 1 (got {limit})")
         layer_url = self._layer_url_for_item(resource_id)
 
         where_clause = filters.get("where", "1=1") if filters else "1=1"
@@ -961,9 +1045,9 @@ class ArcGISPlugin(DataPlugin):
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         if not -180 <= lon <= 180:
-            raise ValueError(f"lon must be between -180 and 180 (got {lon})")
+            raise ToolInputError(f"lon must be between -180 and 180 (got {lon})")
         if not -90 <= lat <= 90:
-            raise ValueError(f"lat must be between -90 and 90 (got {lat})")
+            raise ToolInputError(f"lat must be between -90 and 90 (got {lat})")
         layer_url = self._layer_url_for_item(item_id)
         where_clause = WhereValidator.validate(where)
         # inSR/outSR 4326 is the WGS84 contract. The layers are authored in
@@ -992,7 +1076,7 @@ class ArcGISPlugin(DataPlugin):
         Returns candidates with matched_address, lon, and lat.
         """
         if not address or not address.strip():
-            raise ValueError("address is required")
+            raise ToolInputError("address is required")
         region = (
             self.plugin_config.geocoder_region if self.plugin_config else ""
         ) or ""
