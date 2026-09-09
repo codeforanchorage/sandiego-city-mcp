@@ -239,7 +239,7 @@ except Exception as e:
 try:
     r = call_tool("query_data", {"dataset_id": MHPA_ID, "where": "habpres >= 90"})
     t = text_of(r)
-    ok = bool(r.get("isError")) and "did you mean 'HABPRES'" in t
+    ok = r.get("result", {}).get("isError") is True and "did you mean 'HABPRES'" in t
     check("query_data unknown field -> did-you-mean", ok, t[:70])
 except Exception as e:
     check("query_data unknown field -> did-you-mean", False, repr(e))
