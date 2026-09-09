@@ -128,6 +128,14 @@ try:
         },
     )
     check("initialize", bool(r["result"]["serverInfo"]["name"]))
+    # The server `instructions` block is what steers the model; it ships
+    # inside the zip, so a stale package silently drops it.
+    instr = r["result"].get("instructions", "")
+    check(
+        "initialize carries instructions",
+        "WGS84" in instr and "dataset_id" in instr,
+        f"{len(instr)} chars",
+    )
 except Exception as e:
     check("initialize", False, repr(e))
 

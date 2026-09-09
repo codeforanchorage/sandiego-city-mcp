@@ -74,7 +74,7 @@ terraform output -raw lambda_url      # Testing
 
 ## Configuration
 
-Config is passed via `OPENCONTEXT_CONFIG` env var. Create `config.yaml` from `config-example.yaml`, edit it, and run `./scripts/deploy.sh` to update.
+Config ships inside the deployment zip (the `OPENCONTEXT_CONFIG` env var is left empty; Lambda caps env vars at 4KB). Create `config.yaml` from `config-example.yaml`, edit it, and run `./scripts/deploy.sh` to update -- the script verifies the packaged copy matches the source.
 
 ### Lambda Settings (in config.yaml)
 

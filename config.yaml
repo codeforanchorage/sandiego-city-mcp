@@ -13,6 +13,61 @@ server_version: "1.1.0" # reported in initialize -> serverInfo; bump on protocol
 description: "City of San Diego GIS MCP server - Safe, conversational access to the city's ArcGIS Server layers"
 organization: "City of San Diego"
 
+# Guidance surfaced to the client/model in the `initialize` response. This
+# is the one place to steer how the model uses the tools. Because it pushes
+# the config past Lambda's 4KB environment-variable cap, the whole config is
+# shipped INSIDE the deployment zip (deploy.sh) and read from there at
+# runtime; OPENCONTEXT_CONFIG is left empty in Terraform.
+instructions: |
+  You are connected to the City of San Diego's GIS: ~700 map layers from
+  the City's own ArcGIS Server (webmaps.sandiego.gov), indexed from a
+  crawl of its services directory. This is CITY data -- Planning (zoning,
+  community plans, habitat), Development Services (DSD), Parks, Fire,
+  Stormwater, and many Hosted feature layers. Every tool is READ-ONLY and
+  safe to call without confirmation.
+
+  Workflow:
+  1. search_datasets(q=...) to find layers by topic or acronym (e.g.
+     'zoning', 'MHPA', 'community plan', 'fire station'). Every result is
+     a queryable layer with a dataset_id.
+  2. get_layer_schema(item_id=<dataset_id>) to read the REAL,
+     CASE-SENSITIVE field names before writing any WHERE clause. Use
+     get_distinct_values(item_id, field) to confirm the exact spelling of
+     codes (e.g. 'RS-1-7' vs 'RS-1-07').
+  3. query_data(dataset_id, where, out_fields, order_by, limit). The
+     output leads with TOTAL MATCHING -- the full server-side count -- so
+     "how many X?" needs no paging. Use order_by (e.g. 'ACRES DESC') for
+     top-N questions.
+
+  dataset_id is a services-directory PATH, not a GUID:
+    {folder}/{service}/{MapServer|FeatureServer}/{layerId}
+  e.g. Planning/PLN_LongRangePlanning/MapServer/7 (MHPA). Never invent
+  one; take it from search_datasets.
+
+  Location questions -- "what zone / plan area / preserve is at X?":
+  spatial_query_point(item_id=<polygon layer>, address=...) geocodes a
+  street address (US Census geocoder, biased to San Diego) and returns
+  the attributes of every polygon containing that point; or pass lon and
+  lat directly (WGS84 decimal degrees, lon FIRST, e.g. lon=-117.16,
+  lat=32.72). All coordinates in and out are WGS84 -- the layers are
+  authored in State Plane feet but the server handles the conversion.
+  geocode_address(address) is available on its own.
+
+  Key layers, all in Planning/PLN_LongRangePlanning/MapServer:
+    /7  Multi-Habitat Planning Area (MHPA) -- fields HABPRES, INHABPRES,
+        SUBAREA, ACRES
+    /27 Base Zones -- the official zoning layer (ZONE_NAME)
+    /24 Community Plan Land Use -- adopted plan designations
+  get_aggregations(field='folder') shows how the catalog is organised.
+
+  Limits: the catalog is a snapshot (see get_dataset for the crawl date);
+  ~15 services (AMPGIS, GetItDone, PUD_*, ...) require a City login and
+  are not indexed. County-wide and regional layers (parcels, SanGIS,
+  SANDAG) live on the separate San Diego Regional GIS MCP server, which
+  exposes the SAME tool names -- use it for anything outside City
+  services. Field names are case-sensitive; an unknown field returns a
+  did-you-mean suggestion rather than results.
+
 # Plugin configuration
 # ====================
 #

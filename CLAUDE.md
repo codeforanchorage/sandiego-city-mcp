@@ -67,7 +67,7 @@ Claude (stdio) → Go client (client/) or stdio_bridge.py → HTTP POST /mcp
 - `core/interfaces.py` — Abstract bases: `MCPPlugin`, `DataPlugin`, plus `ToolDefinition`, `ToolResult`, `PluginType` enum
 - `core/plugin_manager.py` — Discovers plugins by scanning `plugins/` and `custom_plugins/` for `plugin.py` files. Registers tools with `pluginname__toolname` prefix. Routes `tools/call` to the correct plugin.
 - `core/mcp_server.py` — Handles MCP JSON-RPC methods: `initialize`, `tools/list`, `tools/call`, `ping`
-- `core/validators.py` — Loads config from `config.yaml` (local) or `OPENCONTEXT_CONFIG` env var (Lambda). Enforces single-plugin rule.
+- `core/validators.py` — Loads config from `config.yaml`. On Lambda the file is read from inside the deployment package (`$LAMBDA_TASK_ROOT/config.yaml`); `OPENCONTEXT_CONFIG` is left empty because the config (with its `instructions` block) exceeds the 4KB env-var cap. Enforces single-plugin rule.
 - `server/adapters/aws_lambda.py` — AWS Lambda entry point (handler: `server.adapters.aws_lambda.lambda_handler`). Also `server/lambda_handler.py` as legacy entry point.
 - `server/http_handler.py` — Cloud-agnostic HTTP handler shared by Lambda and local server
 - `stdio_bridge.py` — Python stdio-to-HTTP bridge for connecting Claude Desktop/Code to the local server (alternative to Go client)
@@ -80,7 +80,7 @@ New plugins must implement `MCPPlugin` (or `DataPlugin` for data sources). Place
 
 ## Configuration
 
-Copy `config-example.yaml` to `config.yaml`. Enable exactly one plugin. Config supports `${ENV_VAR}` substitution. For Lambda, config is serialized to the `OPENCONTEXT_CONFIG` env var by Terraform.
+Copy `config-example.yaml` to `config.yaml`. Enable exactly one plugin. Config supports `${ENV_VAR}` substitution. For Lambda, `deploy.sh` copies `config.yaml` INTO the zip and verifies the packaged copy matches; Terraform sets `OPENCONTEXT_CONFIG` to an empty string so the handler reads the packaged file. The top-level `instructions` block is returned verbatim in the `initialize` response and is the one place to steer how the model uses the tools -- edit it, redeploy, no code change.
 
 ## CI
 

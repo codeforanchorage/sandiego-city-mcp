@@ -25,8 +25,10 @@ from server.http_handler import UniversalHTTPHandler
 
 logger = logging.getLogger(__name__)
 
-# Load config (OPENCONTEXT_CONFIG env var for tests; default config.yaml)
-_config_path = os.environ.get("OPENCONTEXT_CONFIG", "config.yaml")
+# Load config (OPENCONTEXT_CONFIG env var for tests; default config.yaml).
+# An EMPTY value means unset -- that is what Terraform now ships to Lambda,
+# and running locally the same way must exercise the packaged-file fallback.
+_config_path = os.environ.get("OPENCONTEXT_CONFIG") or "config.yaml"
 with open(_config_path) as f:
     config = yaml.safe_load(f)
 

@@ -248,6 +248,11 @@ cp -r plugins "$PACKAGE_DIR/"
 cp -r custom_plugins "$PACKAGE_DIR/" 2>/dev/null || mkdir -p "$PACKAGE_DIR/custom_plugins"
 cp -r server "$PACKAGE_DIR/"
 cp requirements.txt "$PACKAGE_DIR/" 2>/dev/null || true
+# Ship config.yaml INSIDE the package. The Lambda reads it at runtime
+# (server/http_handler.py::_packaged_config_path) instead of via the
+# OPENCONTEXT_CONFIG env var, which AWS caps at 4KB -- the config exceeds
+# that once the server `instructions` block is included.
+cp config.yaml "$PACKAGE_DIR/"
 
 # Install Python dependencies into package directory
 echo "Installing Python dependencies..."
@@ -300,6 +305,30 @@ echo -e "${YELLOW}🏗️  Step 3: Deploying with Terraform...${NC}"
 # Copy zip file and config.yaml to Terraform module directory
 cp "$ZIP_FILE" terraform/aws/lambda-deployment.zip
 cp config.yaml terraform/aws/config.yaml
+
+# Verify the config INSIDE the built package matches the source.
+# terraform/aws/config.yaml and the zip are gitignored BUILD ARTIFACTS
+# that this script overwrites, so a stale one is easy to miss. It matters
+# because aws.lambda_timeout surfaces as a Terraform attribute diff, but
+# plugins.*.timeout and `instructions` ship inside the zip and only ever
+# show up as a code-hash change -- indistinguishable from a no-op plan
+# unless you look in the archive.
+echo -e "${YELLOW}🔍 Verifying packaged config...${NC}"
+if ! python3 -c "
+import sys, yaml, zipfile
+packaged = yaml.safe_load(zipfile.ZipFile('$ZIP_FILE').read('config.yaml'))
+source = yaml.safe_load(open('config.yaml', encoding='utf-8'))
+if packaged != source:
+    print('Packaged config.yaml differs from the source config.yaml')
+    sys.exit(1)
+name = next(n for n, c in source['plugins'].items() if c.get('enabled'))
+print(f\"  plugin={name} plugin_timeout={source['plugins'][name].get('timeout')}s \"
+      f\"lambda_timeout={source['aws']['lambda_timeout']}s \"
+      f\"instructions={'yes' if source.get('instructions') else 'no'}\")
+"; then
+    echo -e "${RED}❌ Error: packaged config does not match config.yaml${NC}"
+    exit 1
+fi
 
 # Initialize Terraform if needed
 if [ ! -d "terraform/aws/.terraform" ]; then
