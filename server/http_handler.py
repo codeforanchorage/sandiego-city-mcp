@@ -16,7 +16,7 @@ from core.logging_utils import (
     format_request_log,
     format_response_log,
 )
-from core.mcp_server import MCPServer
+from core.mcp_server import ERA_MODERN, MCPServer
 from core.plugin_manager import PluginManager
 from core.validators import (
     ConfigurationError,
@@ -84,15 +84,6 @@ def _load_config() -> Dict[str, Any]:
             logger.info("Loaded configuration from environment variable")
             return _config
         except json.JSONDecodeError as e:
-            # Terraform sets OPENCONTEXT_CONFIG to serialized JSON, but the
-            # local server has always treated it as a PATH to a YAML file.
-            # Accept both, so local dev can route through this same handler
-            # (and therefore exercise the Origin and protocol-version
-            # checks) without a second config convention.
-            if os.path.isfile(config_json):
-                _config = load_and_validate_config(config_json)
-                logger.info("Loaded configuration from OPENCONTEXT_CONFIG file path")
-                return _config
             logger.error(f"Failed to parse config from environment: {e}")
             raise
 
@@ -148,21 +139,14 @@ class UniversalHTTPHandler:
     """Universal HTTP handler for cloud-agnostic request processing."""
 
     # Browser origins allowed to call /mcp via cross-origin requests.
-    # This list is ENFORCED, not merely reflected: a request carrying an
-    # Origin outside it is rejected with 403 before any routing or plugin
-    # code runs (spec: "Servers MUST validate the Origin header on all
-    # incoming connections to prevent DNS rebinding attacks").
-    #
-    # A request with NO Origin header is allowed. curl, the Go client,
-    # Claude Desktop and every other non-browser caller send none, and
-    # DNS rebinding is a browser-only attack -- a blanket requirement
-    # would break every legitimate native client to stop nothing.
+    # Native MCP clients (Claude Desktop, Claude Code, server-side
+    # integrations) do not enforce CORS, so they are unaffected by this
+    # list. Add real consumers here as they show up in CloudWatch.
     ALLOWED_ORIGINS = frozenset(
         {
             "https://claude.ai",
             "https://claude.com",
             "https://console.anthropic.com",
-            # MCP Inspector's default dev port.
             "http://localhost:6274",
             "http://127.0.0.1:6274",
         }
@@ -172,15 +156,6 @@ class UniversalHTTPHandler:
     # legitimate browser consumer today; reflecting it ensures the most
     # common case keeps working without a request-header round-trip.
     DEFAULT_CORS_ORIGIN = "https://claude.ai"
-
-    # Spec (transports, Protocol Version Header): if no
-    # MCP-Protocol-Version header arrives, and the server has no other way
-    # to identify the version, it SHOULD assume 2025-03-26. An absent
-    # header is therefore NOT an error. This server's wire format is
-    # identical across every supported revision, so the assumed version
-    # only shapes logging -- but the assumption still has to be the
-    # spec-defined one so log analysis of legacy clients is honest.
-    ASSUMED_PROTOCOL_VERSION = "2025-03-26"
 
     # Request paths that carry MCP JSON-RPC. The hardened GCC route
     # (/mcp-gcc) shares this same Lambda handler as the public /mcp route;
@@ -193,7 +168,9 @@ class UniversalHTTPHandler:
         logger.info("UniversalHTTPHandler initialized")
 
     @classmethod
-    def _get_cors_headers(cls, request_origin: Optional[str] = None) -> Dict[str, str]:
+    def _get_cors_headers(
+        cls, request_origin: Optional[str] = None
+    ) -> Dict[str, str]:
         """Build CORS response headers, reflecting allowlisted origins.
 
         Args:
@@ -214,15 +191,35 @@ class UniversalHTTPHandler:
             "Access-Control-Allow-Origin": allow_origin,
             "Vary": "Origin",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
-            # mcp-protocol-version is required on requests since spec
-            # 2025-06-18; mcp-method/mcp-name arrive with 2026-07-28.
-            # Preflight must allow them or browser clients fail CORS.
             "Access-Control-Allow-Headers": (
-                "content-type, accept, mcp-session-id, "
-                "mcp-protocol-version, mcp-method, mcp-name"
+                "content-type, accept, mcp-session-id, mcp-protocol-version, "
+                "mcp-method, mcp-name"
             ),
             "Access-Control-Expose-Headers": "x-request-id, mcp-session-id",
         }
+
+    @classmethod
+    def _origin_rejected(cls, request_origin: Optional[str]) -> bool:
+        """Whether a request must be refused because of its Origin.
+
+        The MCP HTTP transport requires servers to answer 403 Forbidden for
+        an invalid Origin — the defence against DNS-rebinding attacks, which
+        matters here because ``/mcp`` is anonymous and CloudWatch already
+        shows it being probed.
+
+        Only a *present* Origin can be invalid: native MCP clients (Claude
+        Desktop, Claude Code, the claude.ai backend connector, Copilot
+        Studio, curl) send none at all, and are unaffected. A browser origin
+        that is not on the allowlist already fails CORS today — this turns a
+        confusing client-side CORS failure into an explicit server refusal.
+
+        Args:
+            request_origin: The Origin header from the request, if any.
+
+        Returns:
+            True if the request should be rejected with 403.
+        """
+        return bool(request_origin) and request_origin not in cls.ALLOWED_ORIGINS
 
     async def handle_request(
         self,
@@ -254,11 +251,9 @@ class UniversalHTTPHandler:
         # Pull Origin header so CORS responses can reflect allowlisted origins.
         request_origin = headers.get("origin") if headers else None
 
-        # DNS-rebinding defence. This runs FIRST, ahead of routing, body
-        # parsing and any plugin code: a hostile page must not be able to
-        # reach the JSON-RPC layer at all. Requests with no Origin (curl,
-        # native MCP clients) pass through -- see ALLOWED_ORIGINS.
-        if request_origin is not None and request_origin not in self.ALLOWED_ORIGINS:
+        # Reject disallowed browser origins outright (DNS-rebinding defence)
+        # before the request reaches any routing or plugin code.
+        if self._origin_rejected(request_origin):
             duration_ms = (time.perf_counter() - start_time) * 1000
             error_body = json.dumps(
                 {
@@ -266,16 +261,13 @@ class UniversalHTTPHandler:
                     "id": None,
                     "error": {
                         "code": -32600,
-                        "message": "Forbidden origin",
-                        "data": (
-                            f"Origin '{request_origin}' is not allowed to "
-                            f"call this MCP endpoint."
-                        ),
+                        "message": "Forbidden",
+                        "data": "Origin not allowed",
                     },
                 }
             )
             logger.warning(
-                f"403 error: rejected disallowed Origin '{request_origin}'",
+                f"403 error: Origin '{request_origin}' not allowed",
                 extra={
                     "request_id": request_id,
                     "request_path": path,
@@ -285,7 +277,7 @@ class UniversalHTTPHandler:
                 },
             )
             error_headers = {"Content-Type": "application/json"}
-            error_headers.update(self._get_cors_headers(request_origin))
+            error_headers.update(self._get_cors_headers(None))
             return (403, error_headers, error_body)
 
         # Validate path - must be an MCP route
@@ -350,61 +342,76 @@ class UniversalHTTPHandler:
                 error_body,
             )
 
-        # Parse JSON to check if this is an initialize request
+        # Parse JSON once up front: to echo the JSON-RPC id on transport-level
+        # errors (the spec's UnsupportedProtocolVersionError example carries
+        # the request's id, and a client correlating in-flight requests needs
+        # it), to detect initialize requests and mint a session ID, and to
+        # classify the era.
         # NOTE: This is intentionally parsing the JSON body separately from the
-        # later parsing in _mcp_server.handle_http_request(). This early parsing
-        # allows us to detect initialize requests and generate session IDs without
-        # affecting error handling if the JSON is invalid. The body will be parsed
-        # again later, which is an acceptable trade-off for error handling isolation.
+        # later parsing in _mcp_server.handle_http_request(), so a malformed
+        # body still gets that method's -32700 handling. The body is small;
+        # parsing it twice is an acceptable trade-off for error isolation.
+        body_request_id = None
         try:
             request_json = json.loads(body)
+            body_request_id = request_json.get("id")
             is_initialize = request_json.get("method") == "initialize"
+            is_modern = (
+                MCPServer.request_era(request_json, headers) == ERA_MODERN
+            )
         except (json.JSONDecodeError, AttributeError):
             is_initialize = False
+            is_modern = False
 
-        # Validate the MCP-Protocol-Version header (spec: transports,
-        # Protocol Version Header). `initialize` is exempt: the header is
-        # only required on requests *after* initialization, and that
-        # request negotiates the version in its body. Rejecting it here
-        # would deadlock a client whose first attempt names a revision we
-        # do not support -- it could never reach the handshake that would
-        # settle on one we do.
-        protocol_version = headers.get("mcp-protocol-version") if headers else None
+        # Validate the MCP-Protocol-Version header, which clients have been
+        # required to send on every post-handshake request since 2025-06-18.
+        # Absent means an older client: the spec says assume 2025-03-26, so
+        # we let it through untouched. Both legacy (2025-11-25 and earlier,
+        # initialize handshake) and modern (2026-07-28+, per-request _meta)
+        # revisions are served -- see core/mcp_server.py for the split; the
+        # modern era's header/body consistency checks happen there, once
+        # the body has been parsed.
+        #
+        # A version we implement in neither era gets the modern
+        # UnsupportedProtocolVersionError (-32022) listing what we do
+        # support: a modern client retries with one of those, and a
+        # legacy client at least sees a version it can ask for on
+        # initialize. (This used to be a bare -32600 on purpose, so that
+        # dual-era clients would fall back to initialize; now that we are
+        # dual-era ourselves that fallback would cost them a round trip
+        # for nothing.)
+        declared_version = (
+            headers.get("mcp-protocol-version") if headers else None
+        )
         if (
-            protocol_version is not None
-            and not is_initialize
-            and protocol_version not in MCPServer.SUPPORTED_PROTOCOL_VERSIONS
+            declared_version
+            and declared_version not in MCPServer.SUPPORTED_PROTOCOL_VERSIONS
         ):
             duration_ms = (time.perf_counter() - start_time) * 1000
-            # Deliberately -32600 and NOT -32022
-            # (UnsupportedProtocolVersionError). Per the 2026-07-28
-            # compatibility matrix a dual-era client reads a 4xx with no
-            # recognized modern error body as "legacy server" and falls
-            # back to the initialize handshake, which is exactly what this
-            # server wants. Returning -32022 would advertise a modern
-            # server this is not, and the client would retry rather than
-            # fall back.
             error_body = json.dumps(
                 {
                     "jsonrpc": "2.0",
-                    "id": None,
+                    "id": body_request_id,
                     "error": {
-                        "code": -32600,
-                        "message": "Unsupported MCP-Protocol-Version",
+                        "code": -32022,
+                        "message": "Unsupported protocol version",
                         "data": {
-                            "requested": protocol_version,
-                            "supported": list(MCPServer.SUPPORTED_PROTOCOL_VERSIONS),
+                            "supported": list(
+                                MCPServer.SUPPORTED_PROTOCOL_VERSIONS
+                            ),
+                            "requested": declared_version,
                         },
                     },
                 }
             )
             logger.warning(
-                f"400 error: unsupported MCP-Protocol-Version '{protocol_version}'",
+                f"400 error: unsupported MCP-Protocol-Version "
+                f"'{declared_version}'",
                 extra={
                     "request_id": request_id,
                     "request_path": path,
                     "http_method": method,
-                    "mcp_protocol_version": protocol_version,
+                    "mcp_protocol_version": declared_version,
                     "duration_ms": duration_ms,
                 },
             )
@@ -426,7 +433,12 @@ class UniversalHTTPHandler:
                 extra={"request_id": request_id, "mcp_session_id": session_id},
             )
 
-        effective_session_id = session_id or incoming_session_id
+        # Modern-era (2026-07-28) requests have no session: an
+        # Mcp-Session-Id a client sends anyway is ignored, never echoed or
+        # logged as if it correlated anything.
+        effective_session_id = (
+            None if is_modern else (session_id or incoming_session_id)
+        )
 
         # Log request details
         request_log_data = format_request_log(
@@ -439,13 +451,6 @@ class UniversalHTTPHandler:
         )
         if effective_session_id:
             request_log_data["mcp_session_id"] = effective_session_id
-        # Record which revision this request is being handled under, so a
-        # log search can tell a client that declared one from a legacy
-        # client we assumed 2025-03-26 for.
-        request_log_data["mcp_protocol_version"] = (
-            protocol_version or self.ASSUMED_PROTOCOL_VERSION
-        )
-        request_log_data["mcp_protocol_version_assumed"] = protocol_version is None
         logger.info("Incoming HTTP request", extra=request_log_data)
 
         try:
@@ -583,6 +588,27 @@ class UniversalHTTPHandler:
             Tuple of (status_code, response_headers, response_body)
         """
         request_id = request_id or "unknown"
+
+        # Refuse the preflight outright for a disallowed origin, so the
+        # browser never issues the actual request.
+        if self._origin_rejected(request_origin):
+            logger.warning(
+                f"403 preflight: Origin '{request_origin}' not allowed",
+                extra={
+                    "request_id": request_id,
+                    "request_origin": request_origin,
+                },
+            )
+            return (
+                403,
+                {
+                    **self._get_cors_headers(None),
+                    "Content-Type": "application/json",
+                    "X-Request-ID": request_id,
+                },
+                "",
+            )
+
         cors_headers = {
             **self._get_cors_headers(request_origin),
             "Access-Control-Max-Age": "86400",

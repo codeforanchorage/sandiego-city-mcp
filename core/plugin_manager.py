@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from core.interfaces import MCPPlugin, ToolResult
+from core.interfaces import MCPPlugin, ToolResult, UnknownToolError
 from core.validators import ConfigurationError, get_enabled_plugin_config
 
 logger = logging.getLogger(__name__)
@@ -218,19 +218,6 @@ class PluginManager:
 
         logger.info(f"Registered {len(tools)} tools from plugin {plugin_name}")
 
-    def has_tool(self, tool_name: str) -> bool:
-        """Whether a fully-prefixed tool name is registered.
-
-        Callers use this to distinguish "no such tool" (a caller error
-        the MCP layer reports as JSON-RPC -32602) from a tool that exists
-        but failed while running.
-        """
-        return tool_name in self.tools
-
-    def list_tool_names(self) -> List[str]:
-        """Registered tool names, sorted, for error messages and clients."""
-        return sorted(self.tools.keys())
-
     async def execute_tool(
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> ToolResult:
@@ -254,9 +241,7 @@ class PluginManager:
 
         if tool_name not in self.tools:
             available = ", ".join(sorted(self.tools.keys()))
-            raise ValueError(
-                f"Tool '{tool_name}' not found. Available tools: {available}"
-            )
+            raise UnknownToolError(tool_name, available)
 
         plugin_name, actual_tool_name = self.tools[tool_name]
         plugin = self.plugins.get(plugin_name)
@@ -297,7 +282,9 @@ class PluginManager:
                     "description": tool_def.description,
                     "inputSchema": tool_def.input_schema,
                 }
-                # `title` is a top-level Tool field, not an annotation.
+                # `title` is a top-level Tool field, not an annotation. It is
+                # the display name clients prefer over the prefixed `name`,
+                # which is an identifier and reads poorly in a picker.
                 if tool_def.title:
                     tool_dict["title"] = tool_def.title
                 if tool_def.output_schema:
@@ -306,10 +293,6 @@ class PluginManager:
                     tool_dict["annotations"] = tool_def.annotations
                 tools.append(tool_dict)
 
-        # Ordering is deterministic: plugins preserve insertion order and
-        # each plugin returns a static tool list, so tools/list is byte
-        # identical between calls. Clients can cache it, and an unchanged
-        # list keeps prompt-cache hits alive.
         return tools
 
     async def health_check(self) -> Dict[str, bool]:
