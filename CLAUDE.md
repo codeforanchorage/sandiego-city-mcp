@@ -80,7 +80,7 @@ New plugins must implement `MCPPlugin` (or `DataPlugin` for data sources). Place
 
 ## Configuration
 
-Copy `config-example.yaml` to `config.yaml`. Enable exactly one plugin. Config supports `${ENV_VAR}` substitution. For Lambda, `deploy.sh` copies `config.yaml` INTO the zip and verifies the packaged copy matches; Terraform sets `OPENCONTEXT_CONFIG` to an empty string so the handler reads the packaged file. The top-level `instructions` block is returned verbatim in the `initialize` response and is the one place to steer how the model uses the tools -- edit it, redeploy, no code change.
+Copy `config-example.yaml` to `config.yaml`. Enable exactly one plugin. Config does **NOT** support `${ENV_VAR}` substitution: `core/validators.py::load_and_validate_config` is a plain `yaml.safe_load`, so a `${VAR}` reaches the plugin as that literal string. Read secrets from `os.environ` in the plugin's `initialize()` instead, and never put one in `config.yaml` -- it is deployed with the Lambda. For Lambda, `deploy.sh` copies `config.yaml` INTO the zip and verifies the packaged copy matches; Terraform sets `OPENCONTEXT_CONFIG` to an empty string so the handler reads the packaged file. The top-level `instructions` block is returned verbatim in the `initialize` response and is the one place to steer how the model uses the tools -- edit it, redeploy, no code change.
 
 ## CI
 
