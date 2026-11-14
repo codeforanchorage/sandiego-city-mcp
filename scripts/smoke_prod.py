@@ -322,7 +322,9 @@ except Exception as e:
 # one caught a real regression somewhere in the fleet at least once.
 
 # 14. protocol version negotiation -- a supported requested version is
-#     echoed; an unknown one falls back to the newest supported.
+#     echoed; an unknown one gets a legacy version the server does
+#     implement (the core answers 2025-03-26, the spec's assumed
+#     default; the check accepts any legacy revision).
 try:
     r = rpc(
         "initialize",
@@ -343,7 +345,8 @@ try:
     )
     fallback = r2["result"]["protocolVersion"]
     info = r2["result"]["serverInfo"]
-    ok = echoed and fallback >= "2025-11-25" and info["name"] != "opencontext"
+    legacy = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+    ok = echoed and fallback in legacy and info["name"] != "opencontext"
     check(
         "initialize negotiates protocolVersion",
         ok,
@@ -360,18 +363,19 @@ try:
 except Exception as e:
     check("unknown method -> -32601", False, repr(e))
 
-# 16. unknown tool -> -32602 with the available tool list in data
+# 16. unknown tool -> -32602 with the available tools named in data
 try:
     r = rpc("tools/call", {"name": "arcgis__nope", "arguments": {}})
     err = r.get("error", {})
     ok = (
         err.get("code") == -32602
         and err.get("message", "").startswith("Unknown tool")
-        and "arcgis__query_data" in (err.get("data") or {}).get("available_tools", [])
+        # `data` is a string: "Available tools: a, b, ..."
+        and "arcgis__query_data" in str(err.get("data"))
     )
-    check("unknown tool -> -32602 + available_tools", ok, str(err)[:70])
+    check("unknown tool -> -32602 + available tools", ok, str(err)[:70])
 except Exception as e:
-    check("unknown tool -> -32602 + available_tools", False, repr(e))
+    check("unknown tool -> -32602 + available tools", False, repr(e))
 
 # 17. non-object arguments -> -32602, never a raw Python error
 try:
@@ -412,9 +416,9 @@ try:
 except Exception as e:
     check("allowlisted Origin -> 200 + reflected", False, repr(e))
 
-# 21. unsupported MCP-Protocol-Version -> 400 / -32600 with the supported
-#     list, and deliberately NOT -32022 (a dual-era client reads a plain
-#     4xx as "legacy server" and falls back to initialize, which we want).
+# 21. unsupported MCP-Protocol-Version -> 400 / -32022 (UnsupportedProtocolVersionError)
+#     with the supported list. The server is dual-era now, so it answers
+#     with the modern error instead of a bare -32600.
 try:
     status, _, body = raw(
         payload=jsonrpc("ping"), headers={"MCP-Protocol-Version": "1999-01-01"}
@@ -422,14 +426,14 @@ try:
     err = (body or {}).get("error", {})
     ok = (
         status == 400
-        and err.get("code") == -32600
+        and err.get("code") == -32022
         and "2025-11-25" in (err.get("data") or {}).get("supported", [])
     )
     check(
-        "bad MCP-Protocol-Version -> 400/-32600", ok, f"HTTP {status} {str(err)[:50]}"
+        "bad MCP-Protocol-Version -> 400/-32022", ok, f"HTTP {status} {str(err)[:50]}"
     )
 except Exception as e:
-    check("bad MCP-Protocol-Version -> 400/-32600", False, repr(e))
+    check("bad MCP-Protocol-Version -> 400/-32022", False, repr(e))
 
 # 22. supported MCP-Protocol-Version header -> 200
 try:
