@@ -32,8 +32,8 @@ python3 scripts/smoke_prod.py http://localhost:8000/mcp
 
 # Tests
 uv run pytest tests/ -n auto                                    # All tests, parallel
-uv run pytest tests/test_ckan_plugin.py -v                      # Single file
-uv run pytest tests/test_ckan_plugin.py::TestClass::test_name -v  # Single test
+uv run pytest tests/test_arcgis_plugin.py -v                      # Single file
+uv run pytest tests/test_arcgis_plugin.py::TestClass::test_name -v  # Single test
 uv run pytest tests/ --cov=plugins --cov-report=term-missing  # With coverage (80% minimum)
 
 # Linting (ruff)
@@ -74,7 +74,7 @@ Claude (stdio) → Go client (client/) or stdio_bridge.py → HTTP POST /mcp
 - `server/http_handler.py` — Cloud-agnostic HTTP handler shared by Lambda and local server
 - `stdio_bridge.py` — Python stdio-to-HTTP bridge for connecting Claude Desktop/Code to the local server (alternative to Go client)
 
-**Built-in plugins** (`plugins/`): `ckan`, `arcgis`, `socrata` — each implements `DataPlugin` with `search_datasets`, `get_dataset`, `query_data`. Custom plugins go in `custom_plugins/` and are auto-discovered.
+**Plugins** (`plugins/`): `arcgis`. This fork keeps only what it runs or imports; the generic `ckan`, `arcgis` and `socrata` plugins of upstream OpenContext that it did not use were deleted (they remain in [CityOfBoston/OpenContext](https://github.com/CityOfBoston/OpenContext)). A plugin implements `MCPPlugin` (or `DataPlugin` with `search_datasets`, `get_dataset`, `query_data`). Custom plugins go in `custom_plugins/` and are auto-discovered.
 
 ## Plugin Development
 
